@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#121412">
+<title>Golf</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛳</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="top">
+    <div><h1 id="title">Golf</h1><div id="tagline" class="tagline"></div></div>
+    <button id="authbtn" class="ghost">Sign in</button>
+  </div>
+  <nav class="tabs"></nav>
+</header>
+<div id="demo" class="demo" hidden>Demo data. Connect the database in config.js to go live.</div>
+<main id="main"><div class="empty">Loading…</div></main>
+<button id="fab" class="fab ed" aria-label="Add round or match">+</button>
+<footer>
+  <div>by kingtrentz⚡️ x claude</div>
+  <div>Handicaps are unofficial, calculated with USGA World Handicap System math from final scores.</div>
+  <div>Course data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> via <a href="https://opengolfapi.org/attribution">OpenGolfAPI</a> (ODbL).</div>
+</footer>
+<div id="modal" class="modal" hidden></div>
+<div id="toast" class="toast" hidden></div>
+<script src="config.js"></script>
+<script src="demo.js"></script>
+<script type="module" src="app.js"></script>
+</body>
+</html>

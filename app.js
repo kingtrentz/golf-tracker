@@ -250,6 +250,7 @@ function wireCharts(root) {
 // ---------- views ----------
 function render() {
   const tab = state.tab;
+  if (!tab) return;
   document.querySelectorAll(".tabs a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
   const main = $("#main");
   main.innerHTML = tab === "h2h" ? viewH2H() : viewPlayer(tab);

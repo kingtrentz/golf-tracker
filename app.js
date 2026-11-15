@@ -10,7 +10,9 @@ const DEMO = !CFG.supabaseUrl || !CFG.supabaseAnonKey;
 const OGAPI = "https://api.opengolfapi.org";
 
 let sb = null;
-const state = { rounds: [], matches: [], courses: [], user: null, tab: null };
+const state = { rounds: [], matches: [], courses: [], start: {}, user: null, tab: null };
+// Starting handicaps are used until a player has this many full rounds posted.
+const START_UNTIL = CFG.startingIndexRounds ?? 5;
 
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -43,15 +45,22 @@ function indexFrom(rounds) {
   const avg = sorted.reduce((s, r) => s + diffOf(r), 0) / k;
   return { index: Math.min(54, r1(avg + adj)), used: sorted.map(r => r.id), count: elig.length, k };
 }
+// Uses the player's starting handicap until they have enough rounds of their own.
+function effIndex(rounds, slug) {
+  const h = indexFrom(rounds);
+  const start = state.start[slug];
+  if (start != null && h.count < START_UNTIL) return { ...h, index: start, used: [], starting: true };
+  return h;
+}
 const playerRounds = slug => state.rounds.filter(r => r.player === slug).sort(byDate);
-const currentIndex = slug => indexFrom(playerRounds(slug));
+const currentIndex = slug => effIndex(playerRounds(slug), slug);
 const courseHcp = (idx, c) => idx == null ? null : Math.round(idx * (c.slope / 113) + (c.rating - c.par));
 
 function indexHistory(slug) {
   const rs = playerRounds(slug).filter(countsForIndex);
   const out = [];
   for (let i = 0; i < rs.length; i++) {
-    const h = indexFrom(rs.slice(0, i + 1));
+    const h = effIndex(rs.slice(0, i + 1), slug);
     if (h.index != null) out.push({ x: rs[i].played_on, y: h.index });
   }
   return out;
@@ -63,7 +72,7 @@ function evalMatch(m) {
   if (m.status !== "final" || rs.length < 2) return null;
   const rows = rs.map(r => {
     const prior = state.rounds.filter(x => x.player === r.player && x.match_id !== m.id && x.played_on <= m.scheduled_for);
-    const idx = indexFrom(prior).index;
+    const idx = effIndex(prior, r.player).index;
     const ch = courseHcp(idx, r);
     const net = m.scoring === "gross" ? r.score : r.score - (ch ?? 0);
     return { player: r.player, gross: r.score, idx, ch, net, noHcp: idx == null };
@@ -131,12 +140,14 @@ async function loadData() {
     Object.assign(state, d);
     return;
   }
-  const [r, m, c] = await Promise.all([
+  const [r, m, c, pl] = await Promise.all([
     sb.from("rounds").select("*").order("played_on"),
     sb.from("matches").select("*").order("scheduled_for"),
-    sb.from("courses").select("*").order("name")
+    sb.from("courses").select("*").order("name"),
+    sb.from("players").select("*")
   ]);
   for (const x of [r, m, c]) if (x.error) throw x.error;
+  state.start = Object.fromEntries((pl.data || []).filter(x => x.starting_index != null).map(x => [x.slug, Number(x.starting_index)]));
   state.rounds = r.data.map(x => ({ ...x, rating: Number(x.rating), slope: Number(x.slope), par: Number(x.par) }));
   state.matches = m.data.map(x => ({ ...x, rating: x.rating == null ? null : Number(x.rating), slope: x.slope == null ? null : Number(x.slope), par: x.par == null ? null : Number(x.par) }));
   state.courses = c.data.map(x => ({ ...x, rating: Number(x.rating), slope: Number(x.slope), par: Number(x.par) }));
@@ -255,14 +266,14 @@ function viewPlayer(slug) {
   const p = P[slug];
   const rs = playerRounds(slug);
   const full = rs.filter(r => r.holes === 18);
-  const hc = indexFrom(rs);
+  const hc = effIndex(rs, slug);
   const best = [...full].sort((a, b) => (a.score - a.par) - (b.score - b.par) || a.score - b.score)[0];
   const last10 = full.slice(-10);
   const avg = last10.length ? r1(last10.reduce((s, r) => s + r.score, 0) / last10.length) : null;
   const rec = playerRecord(slug);
   const ch = championship();
   const champ = ch.holder === slug ? `<span class="belt">🏆 Master Champ</span>` : "";
-  const idxSub = hc.index == null ? `${hc.count}/3 rounds to get one` : `best ${hc.k} of last ${hc.count}`;
+  const idxSub = hc.starting ? `starting · ${hc.count}/${START_UNTIL} rounds to calculated` : hc.index == null ? `${hc.count}/3 rounds to get one` : `best ${hc.k} of last ${hc.count}`;
 
   const byCourse = {};
   for (const r of full) {
@@ -287,7 +298,8 @@ function viewPlayer(slug) {
   return `
   <section class="hero" style="--pc:${p.color}">
     <div class="hname">${dot(slug)} ${esc(p.name)} ${champ}</div>
-    <div class="hidx"><span class="big">${fmtIdx(hc.index)}</span><span class="hl">handicap index</span></div>
+    <div class="hidx"><span class="big">${fmtIdx(hc.index)}</span><span class="hl">${hc.starting ? "starting handicap" : "handicap index"}</span>
+      <button class="link ed" data-act="edit-start" data-id="${slug}">Edit starting</button></div>
   </section>
   <div class="tiles">
     ${statTile("Index", fmtIdx(hc.index), idxSub)}
@@ -298,7 +310,7 @@ function viewPlayer(slug) {
   <section class="card"><h3>Handicap index over time</h3>${lineChart([{ name: p.name, color: p.color, points: indexHistory(slug) }])}</section>
   <section class="card"><h3>Courses</h3>${courseRows ? `<table class="t"><thead><tr><th>Course</th><th class="n">Rds</th><th class="n">Best</th><th class="n">Avg</th></tr></thead><tbody>${courseRows}</tbody></table>` : `<div class="empty">No rounds yet.</div>`}</section>
   <section class="card"><h3>Round log</h3>
-    <p class="hint">Diff = score differential. <span class="counts">Highlighted</span> ones count toward the index.</p>
+    <p class="hint">Diff = score differential. <span class="counts">Highlighted</span> ones count toward the index.${hc.starting ? ` Starting handicap is used until ${START_UNTIL} full rounds are posted.` : ""}</p>
     ${logRows ? `<table class="t log"><thead><tr><th>Date</th><th>Course</th><th class="n">Score</th><th class="n">Diff</th><th class="ed"></th></tr></thead><tbody>${logRows}</tbody></table>` : `<div class="empty">No rounds yet.</div>`}
   </section>`;
 }
@@ -324,7 +336,7 @@ function viewH2H() {
 
   const idxCards = PLAYERS.map(p => {
     const h = currentIndex(p.slug);
-    return `<div class="tile" style="border-top:3px solid ${p.color}"><div class="tl">${esc(p.name)}</div><div class="tv">${fmtIdx(h.index)}</div><div class="ts">${h.count} rounds</div></div>`;
+    return `<div class="tile" style="border-top:3px solid ${p.color}"><div class="tl">${esc(p.name)}</div><div class="tv">${fmtIdx(h.index)}</div><div class="ts">${h.starting ? "starting" : h.count + " rounds"}</div></div>`;
   }).join("");
 
   const recs = h2hRecords().map(R => {
@@ -567,6 +579,25 @@ function resultsForm(mt) {
   });
 }
 
+function startForm(slug) {
+  openModal(`<h2>${esc(pname(slug))}'s starting handicap</h2>
+    <form id="hf"><label>Starting handicap<input name="v" inputmode="decimal" value="${state.start[slug] ?? ""}" placeholder="blank = none"></label>
+    <p class="hint">Used until ${START_UNTIL} full rounds are posted, then the calculated index takes over.</p>
+    <div class="acts"><button class="primary" type="submit">Save</button></div></form>`, m => {
+    $("#hf", m).onsubmit = async e => {
+      e.preventDefault();
+      const raw = e.target.v.value.trim();
+      const v = raw === "" ? null : Number(raw);
+      if (raw !== "" && (isNaN(v) || v < -10 || v > 54)) return toast("Enter a handicap between -10 and 54.");
+      try {
+        if (!DEMO) { const { error } = await sb.from("players").upsert({ slug, starting_index: v, updated_at: new Date().toISOString() }); if (error) throw error; }
+        if (v == null) delete state.start[slug]; else state.start[slug] = v;
+        closeModal(); await refresh(); toast("Saved.");
+      } catch (err) { toast("Couldn't save: " + errMsg(err)); }
+    };
+  });
+}
+
 function signInForm() {
   openModal(`<h2>Sign in</h2><p class="hint">Only Trent, Dad, and Logan have logins.</p>
     <form id="sf"><label>Email<input type="email" name="email" autocomplete="username" required></label>
@@ -610,6 +641,7 @@ document.addEventListener("click", e => {
   if (act === "edit-match") matchForm(state.matches.find(m => m.id === id));
   if (act === "results") resultsForm(state.matches.find(m => m.id === id));
   if (act === "new-match") matchForm();
+  if (act === "edit-start") startForm(id);
 });
 document.addEventListener("change", e => {
   if (e.target.id === "calcCourse") {

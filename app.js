@@ -11,8 +11,6 @@ const OGAPI = "https://api.opengolfapi.org";
 
 let sb = null;
 const state = { rounds: [], matches: [], courses: [], cards: [], start: {}, phrase: localStorage.getItem("golf_phrase"), tab: null, cardId: null };
-// Starting handicaps are used until a player has this many full rounds posted.
-const START_UNTIL = CFG.startingIndexRounds ?? 5;
 
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -33,24 +31,25 @@ const pname = slug => P[slug]?.name || slug;
 // ---------- handicap math (USGA Rules of Handicapping 5.1 / 5.2) ----------
 const diffOf = r => r1((113 / r.slope) * (r.score - r.rating));
 const countsForIndex = r => r.holes === 18 && r.rating && r.slope && r.score;
-const TABLE = n => n >= 20 ? [8, 0] : n === 19 ? [7, 0] : n >= 17 ? [6, 0] : n >= 15 ? [5, 0] : n >= 12 ? [4, 0]
-  : n >= 9 ? [3, 0] : n >= 7 ? [2, 0] : n === 6 ? [2, -1] : n === 5 ? [1, 0] : n === 4 ? [1, -1] : n === 3 ? [1, -2] : null;
-
-function indexFrom(rounds) {
-  const elig = rounds.filter(countsForIndex).sort(byDate).slice(-20);
-  const rule = TABLE(elig.length);
-  if (!rule) return { index: null, used: [], count: elig.length };
-  const [k, adj] = rule;
-  const sorted = [...elig].sort((a, b) => diffOf(a) - diffOf(b)).slice(0, k);
-  const avg = sorted.reduce((s, r) => s + diffOf(r), 0) / k;
-  return { index: Math.min(54, r1(avg + adj)), used: sorted.map(r => r.id), count: elig.length, k };
-}
-// Uses the player's starting handicap until they have enough rounds of their own.
+// Moving handicap: starts at the player's starting handicap and moves after every
+// 18-hole round, a set share of the way toward that round's score differential
+// (differential = (score - course rating) x 113 / slope). Good rounds pull it down,
+// bad rounds push it up. Unofficial: this is not the USGA best-8-of-20 index.
+const STEP = CFG.handicapStep ?? 0.25;
 function effIndex(rounds, slug) {
-  const h = indexFrom(rounds);
-  const start = state.start[slug];
-  if (start != null && h.count < START_UNTIL) return { ...h, index: start, used: [], starting: true };
-  return h;
+  const elig = rounds.filter(countsForIndex).sort(byDate);
+  const start = state.start[slug] ?? null;
+  let idx = start, last = null;
+  const after = {};
+  for (const r of elig) {
+    const d = diffOf(r);
+    const prev = idx;
+    idx = idx == null ? d : idx + STEP * (d - idx);
+    idx = Math.max(-10, Math.min(54, idx));
+    after[r.id] = r1(idx);
+    last = prev == null ? null : r1(idx) - r1(prev);
+  }
+  return { index: idx == null ? null : r1(idx), count: elig.length, starting: elig.length === 0 && start != null, last: last == null ? null : r1(last), after, start };
 }
 const playerRounds = slug => state.rounds.filter(r => r.player === slug).sort(byDate);
 const currentIndex = slug => effIndex(playerRounds(slug), slug);
@@ -58,11 +57,11 @@ const courseHcp = (idx, c) => idx == null ? null : Math.round(idx * (c.slope / 1
 
 function indexHistory(slug) {
   const rs = playerRounds(slug).filter(countsForIndex);
-  const out = [];
-  for (let i = 0; i < rs.length; i++) {
-    const h = effIndex(rs.slice(0, i + 1), slug);
-    if (h.index != null) out.push({ x: rs[i].played_on, y: h.index });
-  }
+  if (!rs.length) return [];
+  const h = effIndex(rs, slug);
+  const startDay = new Date(parseDate(rs[0].played_on).getTime() - 7 * 864e5).toISOString().slice(0, 10);
+  const out = h.start != null ? [{ x: startDay, y: h.start }] : [];
+  for (const r of rs) out.push({ x: r.played_on, y: h.after[r.id] });
   return out;
 }
 
@@ -112,10 +111,11 @@ function playerRecord(slug) {
 
 // Belt: the first title match winner takes it. The holder keeps it unless
 // someone finishes outright ahead of everyone in a title match the holder plays.
+const isTitle = m => !!m.title_match && PLAYERS.every(p => m.players.includes(p.slug));
 function championship() {
   let holder = null, since = null, defenses = 0;
   const reigns = [];
-  for (const m of state.matches.filter(m => m.status === "final" && m.title_match).sort(byDate)) {
+  for (const m of state.matches.filter(m => m.status === "final" && isTitle(m)).sort(byDate)) {
     const ev = evalMatch(m); if (!ev) continue;
     if (!holder) {
       if (ev.outright) { holder = ev.outright; since = m.scheduled_for; defenses = 0; reigns.push({ player: holder, from: since, to: null, defenses: 0, won_at: m.course_name }); }
@@ -228,7 +228,7 @@ function phraseForm(then) {
 // ---------- chart (single y axis, crosshair tooltip) ----------
 function lineChart(series, { height = 220, label = "Handicap index" } = {}) {
   const pts = series.flatMap(s => s.points);
-  if (pts.length < 2) return `<div class="empty">The chart shows up once there are at least 3 full rounds posted.</div>`;
+  if (pts.length < 2) return `<div class="empty">The chart shows up after the first 18-hole round.</div>`;
   const W = Math.round(Math.max(300, Math.min(790, (document.querySelector("#main")?.clientWidth || 390) - 54))), H = height, L = 30, R = series.length > 1 ? 58 : 14, T = 12, B = 26;
   const xs = pts.map(p => parseDate(p.x).getTime());
   let x0 = Math.min(...xs), x1 = Math.max(...xs); if (x0 === x1) { x0 -= 864e5; x1 += 864e5; }
@@ -320,7 +320,7 @@ function viewPlayer(slug) {
   const rec = playerRecord(slug);
   const ch = championship();
   const champ = ch.holder === slug ? `<span class="belt">🏆 Master Champ</span>` : "";
-  const idxSub = hc.starting ? `starting · ${hc.count}/${START_UNTIL} rounds to calculated` : hc.index == null ? `${hc.count}/3 rounds to get one` : `best ${hc.k} of last ${hc.count}`;
+  const idxSub = hc.index == null ? "posts after the first round" : hc.count === 0 ? "starting · moves every round" : hc.last == null ? `${hc.count} round${hc.count === 1 ? "" : "s"}` : `${hc.last > 0 ? "▲ " + hc.last.toFixed(1) : hc.last < 0 ? "▼ " + Math.abs(hc.last).toFixed(1) : "no change"} last round`;
 
   const byCourse = {};
   for (const r of full) {
@@ -332,20 +332,19 @@ function viewPlayer(slug) {
     `<tr><td>${esc(b.name)}</td><td class="n">${b.n}</td><td class="n"><b>${b.best.score}</b></td><td class="n">${r1(b.sum / b.n)}</td></tr>`).join("");
 
   const logRows = [...rs].reverse().map(r => {
-    const counts = hc.used.includes(r.id);
     const m = r.match_id ? state.matches.find(x => x.id === r.match_id) : null;
     return `<tr>
       <td>${fmtShort(r.played_on)}<div class="yr">${r.played_on.slice(0, 4)}</div></td>
       <td>${esc(r.course_name)}${r.tee_name ? `<span class="tee">${esc(r.tee_name)}</span>` : ""}${m ? `<span class="tag">match</span>` : ""}${r.holes === 9 ? `<span class="tag">9 holes</span>` : ""}${r.hole_scores ? `<span class="tag">hole by hole</span>` : ""}${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ""}</td>
       <td class="n"><b>${r.score}</b><div class="yr">${toPar(r.score, r.par)}</div></td>
-      <td class="n">${countsForIndex(r) ? `<span class="${counts ? "counts" : ""}">${diffOf(r).toFixed(1)}</span>` : "–"}</td>
+      <td class="n">${countsForIndex(r) ? `${diffOf(r).toFixed(1)}<div class="yr">hcp ${fmtIdx(hc.after[r.id])}</div>` : "–"}</td>
       <td class="ed"><button class="link" data-act="edit-round" data-id="${r.id}">Edit</button></td></tr>`;
   }).join("");
 
   return `
   <section class="hero" style="--pc:${p.color}">
     <div class="hname">${dot(slug)} ${esc(p.name)} ${champ}</div>
-    <div class="hidx"><span class="big">${fmtIdx(hc.index)}</span><span class="hl">${hc.starting ? "starting handicap" : "handicap index"}</span>
+    <div class="hidx"><span class="big">${fmtIdx(hc.index)}</span><span class="hl">${hc.starting ? "starting handicap" : "handicap"}</span>
       <button class="link ed" data-act="edit-start" data-id="${slug}">Edit starting</button></div>
   </section>
   <div class="tiles">
@@ -354,10 +353,10 @@ function viewPlayer(slug) {
     ${statTile("Avg (last 10)", avg ?? "–", `${full.length} full rounds`)}
     ${statTile("Match record", `${rec.w}-${rec.l}${rec.t ? "-" + rec.t : ""}`, "W-L-T vs both")}
   </div>
-  <section class="card"><h3>Handicap index over time</h3>${lineChart([{ name: p.name, color: p.color, points: indexHistory(slug) }])}</section>
+  <section class="card"><h3>Handicap over time</h3>${lineChart([{ name: p.name, color: p.color, points: indexHistory(slug) }])}</section>
   <section class="card"><h3>Courses</h3>${courseRows ? `<table class="t"><thead><tr><th>Course</th><th class="n">Rds</th><th class="n">Best</th><th class="n">Avg</th></tr></thead><tbody>${courseRows}</tbody></table>` : `<div class="empty">No rounds yet.</div>`}</section>
   <section class="card"><h3>Round log</h3>
-    <p class="hint">Diff = score differential. <span class="counts">Highlighted</span> ones count toward the index.${hc.starting ? ` Starting handicap is used until ${START_UNTIL} full rounds are posted.` : ""}</p>
+    <p class="hint">Diff = how the round played against the course (score minus rating, adjusted for slope). After every 18-hole round the handicap moves ${Math.round(STEP * 100)}% of the way toward it.</p>
     ${logRows ? `<table class="t log"><thead><tr><th>Date</th><th>Course</th><th class="n">Score</th><th class="n">Diff</th><th class="ed"></th></tr></thead><tbody>${logRows}</tbody></table>` : `<div class="empty">No rounds yet.</div>`}
   </section>`;
 }
@@ -400,15 +399,16 @@ function viewH2H() {
   const upcoming = state.matches.filter(m => m.status === "scheduled").sort(byDate);
   const upRows = upcoming.map(m => {
     const d = daysBetween(today(), m.scheduled_for);
-    const when = d > 1 ? `in ${d} days` : d === 1 ? "tomorrow" : d === 0 ? "today" : "needs results";
+    const live = cardForMatch(m.id);
+    const when = live ? "in progress" : d > 1 ? (d < 7 ? dayName(m.scheduled_for) : `in ${d} days`) : d === 1 ? "tomorrow" : d === 0 ? "today" : "needs results";
     const hasCourse = m.rating && m.slope && m.par;
     return `<div class="match ${d < 0 ? "due" : ""}">
       <div class="mh"><b>${fmtDate(m.scheduled_for)}</b>${m.tee_time ? ` · ${esc(m.tee_time)}` : ""}<span class="when">${when}</span></div>
-      <div class="mc">${esc(m.course_name || "Course TBD")}${m.tee_name ? `<span class="tee">${esc(m.tee_name)}</span>` : ""}${m.title_match ? `<span class="tag gold">🏆 title match</span>` : ""}<span class="tag">${m.scoring}</span></div>
+      <div class="mc">${esc(m.course_name || "Course TBD")}${m.tee_name ? `<span class="tee">${esc(m.tee_name)}</span>` : ""}${isTitle(m) ? `<span class="tag gold">🏆 title match</span>` : ""}<span class="tag">${m.scoring}</span></div>
       <div class="mp">${m.players.map(s => `<span>${dot(s)}${esc(pname(s))}</span>`).join(" vs ")}</div>
       ${hasCourse && m.scoring === "net" ? strokesLine(m, m.players) : ""}
       ${m.notes ? `<div class="note">${esc(m.notes)}</div>` : ""}
-      <div class="ed acts"><button class="primary" data-act="start-card" data-id="${m.id}">Start scorecard</button><button data-act="results" data-id="${m.id}">Post results</button><button class="link" data-act="edit-match" data-id="${m.id}">Edit</button></div>
+      ${live ? `<div class="acts"><a class="btnlink" href="#card/${live.id}">Open scorecard ›</a></div>` : `<div class="ed acts">${d <= 0 ? `<button class="primary" data-act="start-card" data-id="${m.id}">Start scorecard</button>` : ""}<button data-act="results" data-id="${m.id}">Post results</button><button class="link" data-act="edit-match" data-id="${m.id}">Edit</button></div>`}
     </div>`;
   }).join("");
 
@@ -417,7 +417,7 @@ function viewH2H() {
     const ev = evalMatch(m);
     if (!ev) return "";
     return `<div class="match">
-      <div class="mh"><b>${fmtDate(m.scheduled_for)}</b> · ${esc(m.course_name)}${m.title_match ? `<span class="tag gold">🏆</span>` : ""}<span class="tag">${m.scoring}</span></div>
+      <div class="mh"><b>${fmtDate(m.scheduled_for)}</b> · ${esc(m.course_name)}${isTitle(m) ? `<span class="tag gold">🏆</span>` : ""}<span class="tag">${m.scoring}</span></div>
       <table class="t res"><thead><tr><th></th><th class="n">Gross</th>${m.scoring === "net" ? `<th class="n">Hcp</th><th class="n">Net</th>` : ""}</tr></thead><tbody>
       ${ev.rows.map(r => `<tr class="${ev.winners.includes(r.player) ? "win" : ""}"><td>${dot(r.player)}${esc(pname(r.player))}${ev.winners.includes(r.player) ? (ev.outright ? " 🏅" : " (tie)") : ""}</td><td class="n">${r.gross}</td>${m.scoring === "net" ? `<td class="n">${r.noHcp ? "–" : r.ch}</td><td class="n"><b>${r.net}</b></td>` : ""}</tr>`).join("")}
       </tbody></table>
@@ -432,8 +432,8 @@ function viewH2H() {
     <p class="hint">Course handicap = index × slope ÷ 113 + (rating − par).</p></section>` : "";
 
   return `${champCard}
-  <section class="card"><h3>Upcoming matches</h3>${upRows || `<div class="empty">Nothing scheduled.</div>`}
-    <button class="primary ed" data-act="new-match">+ Schedule a match</button></section>
+  <section class="card"><h3>Upcoming rounds</h3>${upRows || `<div class="empty">Nothing scheduled.</div>`}
+    <button class="primary ed" data-act="new-match">+ Schedule a round</button></section>
   <div class="tiles three">${idxCards}</div>
   <section class="card"><h3>Handicap race</h3>${lineChart(PLAYERS.map(p => ({ name: p.name, color: p.color, points: indexHistory(p.slug) })))}</section>
   <section class="card"><h3>Head to head</h3><p class="hint">Every final match counts, scored the way it was set up (net or gross).</p>${recs}</section>
@@ -460,7 +460,7 @@ const errMsg = e => (e && (e.message || e.error_description)) || String(e);
 const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
 const miles = (a, b, c, d) => { const R = 3958.8, t = Math.PI / 180, x = (c - a) * t, y = (d - b) * t;
   const h = Math.sin(x / 2) ** 2 + Math.cos(a * t) * Math.cos(c * t) * Math.sin(y / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
-const normName = s => String(s || "").toLowerCase().replace(/golf|country|club|course|links|the|&|and|[^a-z0-9]/g, "");
+const normName = s => String(s || "").toLowerCase().replace(/golf|country|club|course|links|municipal|the|&|and|[^a-z0-9]/g, "");
 function timed(url, opts = {}, ms = 9000) {
   const c = new AbortController(); const t = setTimeout(() => c.abort(), ms);
   return fetch(url, { ...opts, signal: c.signal }).finally(() => clearTimeout(t));
@@ -666,25 +666,29 @@ function roundForm(r) {
 function matchForm(mt) {
   const editing = !!mt;
   mt = mt || { scheduled_for: today(), players: PLAYERS.map(p => p.slug), scoring: "net", title_match: true, status: "scheduled" };
-  openModal(`<h2>${editing ? "Edit match" : "Schedule a match"}</h2>
+  openModal(`<h2>${editing ? "Edit round" : "Schedule a round"}</h2>
     <form id="mf">
       <div class="row2"><label>Date<input type="date" name="scheduled_for" value="${mt.scheduled_for}" required></label>
       <label>Tee time<input name="tee_time" value="${esc(mt.tee_time || "")}" placeholder="optional"></label></div>
       ${courseFields(mt)}
       <fieldset><legend>Players</legend>${PLAYERS.map(p => `<label class="chk"><input type="checkbox" name="pl" value="${p.slug}" ${mt.players.includes(p.slug) ? "checked" : ""}> ${dot(p.slug)}${esc(p.name)}</label>`).join("")}</fieldset>
       <div class="row2"><label>Scoring<select name="scoring"><option value="net" ${mt.scoring === "net" ? "selected" : ""}>Net (handicaps)</option><option value="gross" ${mt.scoring === "gross" ? "selected" : ""}>Gross</option></select></label>
-      <label class="chk tm"><input type="checkbox" name="title_match" ${mt.title_match ? "checked" : ""}> 🏆 Title match</label></div>
+      <label class="chk tm"><input type="checkbox" name="title_match" ${isTitle(mt) ? "checked" : ""}> 🏆 Title match</label></div>
+      <p class="hint" id="tmhint">Title matches need all three of you.</p>
       <label>Notes<input name="notes" value="${esc(mt.notes || "")}" placeholder="optional"></label>
       <div class="acts"><button class="primary" type="submit">Save</button>${editing ? `<button type="button" class="danger" id="del">Delete</button>` : ""}</div>
     </form>`, m => {
     const f = $("#mf", m); wireCoursePicker(f);
+    const syncTitle = () => { const all = f.querySelectorAll("[name=pl]:checked").length === PLAYERS.length;
+      f.title_match.disabled = !all; if (!all) f.title_match.checked = false; $("#tmhint", m).hidden = all; };
+    f.querySelectorAll("[name=pl]").forEach(x => x.addEventListener("change", syncTitle)); syncTitle();
     f.onsubmit = async e => {
       e.preventDefault();
       const c = readCourse(f);
       const players = [...f.querySelectorAll("[name=pl]:checked")].map(x => x.value);
       if (players.length < 2) return toast("Pick at least 2 players.");
       const row = { scheduled_for: f.scheduled_for.value, tee_time: f.tee_time.value.trim() || null, players, scoring: f.scoring.value,
-        title_match: f.title_match.checked, notes: f.notes.value.trim() || null, course_name: c.course_name || null, tee_name: c.tee_name,
+        title_match: f.title_match.checked && players.length === PLAYERS.length, notes: f.notes.value.trim() || null, course_name: c.course_name || null, tee_name: c.tee_name,
         rating: c.rating, slope: c.slope, par: c.par, status: mt.status || "scheduled" };
       try {
         if (c.course_name && c.rating && c.slope && c.par) row.course_id = await ensureCourse({ ...c, name: c.course_name });
@@ -735,7 +739,7 @@ function resultsForm(mt) {
 function startForm(slug) {
   openModal(`<h2>${esc(pname(slug))}'s starting handicap</h2>
     <form id="hf"><label>Starting handicap<input name="v" inputmode="decimal" value="${state.start[slug] ?? ""}" placeholder="blank = none"></label>
-    <p class="hint">Used until ${START_UNTIL} full rounds are posted, then the calculated index takes over.</p>
+    <p class="hint">The handicap starts here, then moves after every 18-hole round.</p>
     <div class="acts"><button class="primary" type="submit">Save</button></div></form>`, m => {
     $("#hf", m).onsubmit = async e => {
       e.preventDefault();
@@ -762,13 +766,40 @@ function cardTotals(card, s) {
   return { gross, toPar: gross - par, thru, done: thru === card.pars.length };
 }
 const fmtToPar = d => d === 0 ? "E" : d > 0 ? "+" + d : String(d);
+// Top of every tab: the round happening now, else today's, else the next one.
+const cardForMatch = id => state.cards.find(c => c.match_id === id);
+const dayName = s => parseDate(s).toLocaleDateString("en-US", { weekday: "long" });
+function whenText(s) {
+  const d = daysBetween(today(), s);
+  return d === 0 ? "Today" : d === 1 ? "Tomorrow" : d > 1 && d < 7 ? `${dayName(s)} · in ${d} days` : d >= 7 ? `${fmtShort(s)} · in ${d} days` : `${fmtShort(s)} · needs results`;
+}
 function liveStrip() {
-  if (!state.cards.length) return "";
-  return state.cards.map(c => {
-    const lead = c.players.map(s => ({ s, t: cardTotals(c, s) })).filter(x => x.t.thru).sort((a, b) => a.t.toPar - b.t.toPar)[0];
-    const thru = Math.max(0, ...c.players.map(s => cardTotals(c, s).thru));
-    return `<a class="live" href="#card/${c.id}"><span class="pulse"></span><span class="lt"><b>Live</b> · ${esc(c.course_name)}<span class="ls">${thru ? `thru ${thru}` : "not started"}${lead ? ` · ${esc(pname(lead.s))} ${fmtToPar(lead.t.toPar)}` : ""}</span></span><span class="go">Open ›</span></a>`;
-  }).join("");
+  const out = [];
+  for (const c of state.cards) {
+    const board = c.players.map(s => ({ s, t: cardTotals(c, s) })).sort((a, b) => (b.t.thru ? 1 : 0) - (a.t.thru ? 1 : 0) || a.t.toPar - b.t.toPar);
+    const thru = Math.max(0, ...board.map(x => x.t.thru));
+    out.push(`<a class="spot live" href="#card/${c.id}">
+      <div class="sl"><span class="pulse"></span>Current round<span class="sw">${thru ? `thru ${thru}` : "just started"}</span></div>
+      <div class="sc2">${esc(c.course_name)}${c.tee_name ? `<span class="tee">${esc(c.tee_name)}</span>` : ""}</div>
+      <div class="sb">${board.map(x => `<span>${dot(x.s)}${esc(pname(x.s))} <b>${x.t.thru ? fmtToPar(x.t.toPar) : "–"}</b></span>`).join("")}</div>
+      <div class="sgo">Open scorecard ›</div></a>`);
+  }
+  if (!out.length) {
+    const next = state.matches.filter(m => m.status === "scheduled" && !cardForMatch(m.id) && daysBetween(today(), m.scheduled_for) >= 0).sort(byDate)[0];
+    if (next && daysBetween(today(), next.scheduled_for) <= 14) {
+      const isToday = next.scheduled_for === today();
+      const hasCourse = next.rating && next.slope && next.par;
+      out.push(`<section class="spot ${isToday ? "today" : ""}">
+        <div class="sl">${isToday ? "Today's round" : "Upcoming round"}<span class="sw">${whenText(next.scheduled_for)}${next.tee_time ? " · " + esc(next.tee_time) : ""}</span></div>
+        <div class="sc2">${esc(next.course_name || "Course TBD")}${next.tee_name ? `<span class="tee">${esc(next.tee_name)}</span>` : ""}${isTitle(next) ? `<span class="tag gold">🏆 title match</span>` : ""}</div>
+        <div class="sb">${next.players.map(s => `<span>${dot(s)}${esc(pname(s))}</span>`).join(`<span class="muted">vs</span>`)}</div>
+        ${hasCourse && next.scoring === "net" ? strokesLine(next, next.players) : ""}
+        ${isToday ? `<div class="acts"><button class="primary" data-act="start-card" data-id="${next.id}">Start scorecard</button></div>`
+          : `<div class="ss">Becomes the live scorecard when you tee off.</div>`}
+      </section>`);
+    }
+  }
+  return out.join("");
 }
 
 const pending = {}; // cardId -> Set of player slugs (or "__pars") waiting to save
@@ -979,7 +1010,7 @@ function startPolling() {
 }
 
 function addMenu() {
-  openModal(`<h2>Add</h2><div class="acts col"><button class="primary" data-go="card">Start a live scorecard</button><button data-go="round">Post a final score</button><button data-go="match">Schedule a match</button></div>`, m => {
+  openModal(`<h2>Add</h2><div class="acts col"><button class="primary" data-go="card">Start a live scorecard</button><button data-go="round">Post a final score</button><button data-go="match">Schedule a round</button></div>`, m => {
     m.querySelector("[data-go=card]").onclick = () => cardForm();
     m.querySelector("[data-go=round]").onclick = () => roundForm();
     m.querySelector("[data-go=match]").onclick = () => matchForm();

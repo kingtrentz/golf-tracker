@@ -10,7 +10,8 @@ by kingtrentz⚡️ x claude
 - Data lives in a free Supabase database. Anyone can view. Adding or editing needs the family security phrase, which is checked inside the database (stored hashed, never in this code). Each phone remembers it until you tap Lock.
 - Courses near me: uses your phone's location to list saved courses, OpenGolfAPI courses, and OpenStreetMap golf courses nearby. OpenGolfAPI fills tee rating, slope, par, and hole pars when it has them; otherwise type them once from the scorecard and the course is saved with its location.
 - Live scorecard: score hole by hole while you play. Every tap saves; with no signal, scores stay on the phone and save when it reconnects. Anyone with the link can follow along. Finish round posts each player's total to their log (and the match result if it's linked to a match).
-- Handicaps use USGA World Handicap System math (best 8 of last 20 differentials, with the fewer-than-20 table) on final scores. Unofficial: no hole-by-hole caps or daily conditions adjustment.
+- Handicaps move every round: each player starts at their starting handicap, and after every 18-hole round it moves 25% of the way toward that round's score differential ((score - rating) x 113 / slope). Change the 25% with `handicapStep` in config.js. Unofficial, not the USGA best-8-of-20 index.
+- Title matches (the Master Champ belt) only count when all three play.
 - `.github/workflows/keepalive.yml` pings the database every 3 days so Supabase doesn't pause it in the off-season.
 
 ## Database setup (already done for the live site)

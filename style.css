@@ -182,10 +182,6 @@ button.near { width: 100%; margin: -2px 0 8px; background: var(--surface-2); fon
 .row4 label { min-width: 0; }
 
 /* live strip */
-.live { display: flex; align-items: center; gap: 10px; background: #12261a; border: 1px solid #23603c; border-radius: var(--r); padding: 11px 13px; margin-bottom: 12px; color: var(--text); text-decoration: none; }
-.live .lt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.live .ls { display: block; color: var(--text-2); font-size: 12.5px; }
-.live .go { color: var(--accent); font-weight: 700; font-size: 13.5px; }
 .pulse { width: 9px; height: 9px; border-radius: 50%; background: #e5484d; flex: none; display: inline-block; box-shadow: 0 0 0 0 #e5484d88; animation: pulse 1.6s infinite; }
 @keyframes pulse { 70% { box-shadow: 0 0 0 8px #e5484d00; } 100% { box-shadow: 0 0 0 0 #e5484d00; } }
 
@@ -235,3 +231,17 @@ table.sc { width: 100%; border-collapse: collapse; table-layout: fixed; font-siz
 .sc .sc-d { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px #b08040; }
 .legend2 { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
 .legend2 i { display: inline-block; width: 12px; height: 12px; vertical-align: -2px; margin-right: 5px; }
+
+/* round spotlight */
+.spot { display: block; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--r); padding: 13px 14px; margin-bottom: 12px; color: var(--text); text-decoration: none; }
+.spot.today { border-color: #5a4a1a; border-left-color: var(--gold); background: radial-gradient(120% 140% at 0% 0%, #2b2410 0%, var(--surface) 60%); }
+.spot.live { border-color: #23603c; border-left-color: #e5484d; background: #12261a; }
+.sl { display: flex; align-items: center; gap: 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; font-weight: 700; color: var(--accent); }
+.spot.today .sl { color: var(--gold); }
+.spot.live .sl { color: #ff8a8d; }
+.sw { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--text-2); font-size: 12.5px; }
+.sc2 { font-size: 19px; font-weight: 750; margin-top: 4px; }
+.sb { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 15px; font-weight: 600; align-items: baseline; }
+.ss { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+.sgo { color: var(--accent); font-weight: 700; font-size: 13.5px; margin-top: 8px; }
+a.btnlink { display: inline-block; background: var(--accent); color: #06140b; font-weight: 700; border-radius: 10px; padding: 9px 14px; text-decoration: none; }

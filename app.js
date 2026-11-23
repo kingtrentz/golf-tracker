@@ -87,24 +87,32 @@ function roundCh(idx, c, n) {
   return n === 9 ? Math.round(full / 2) : full;
 }
 // Stableford: net double bogey or worse 0, net bogey 1, net par 2, net birdie 3, net eagle 4...
-function stableford(vals, pars, sis, ch) {
+// Group strokes: the lowest course handicap in the group plays at zero; everyone
+// else gets the difference, on the hardest holes. Used for match play and Stableford.
+function groupPops(chs, pars, sis) {
+  const n = pars.length, si = strokeIndex(pars, sis), vals = Object.values(chs).map(x => x ?? 0);
+  const low = Math.min(...vals);
+  return Object.fromEntries(Object.entries(chs).map(([s, ch]) => [s, pars.map((_, i) => vals.length > 1 ? strokesOn((ch ?? 0) - low, si[i], n) : 0)]));
+}
+function stableford(vals, pars, sis, ch, pops) {
   const si = strokeIndex(pars, sis); let pts = 0; const per = [];
   vals.forEach((v, i) => {
     if (v == null) { per.push(null); return; }
-    const p = Math.max(0, 2 + pars[i] - (v - strokesOn(ch ?? 0, si[i], pars.length)));
+    const p = Math.max(0, 2 + pars[i] - (v - (pops ? pops[i] : strokesOn(ch ?? 0, si[i], pars.length))));
     per.push(p); pts += p;
   });
   return { pts, per };
 }
-// Match play between two players, strokes off the lower handicap.
-function matchPlay(a, b, va, vb, cha, chb, pars, sis) {
+// Match play between two players. With group strokes (pa/pb) each player's net is
+// gross minus their group strokes; otherwise strokes off the lower of the two.
+function matchPlay(a, b, va, vb, cha, chb, pars, sis, pa, pb) {
   const n = pars.length, si = strokeIndex(pars, sis);
-  const diff = (cha ?? 0) - (chb ?? 0);
+  const diff = pa && pb ? pa.reduce((x, y) => x + y, 0) - pb.reduce((x, y) => x + y, 0) : (cha ?? 0) - (chb ?? 0);
   let up = 0, thru = 0, closed = null; const res = [];
   for (let i = 0; i < n; i++) {
     if (va[i] == null || vb[i] == null) { res.push(null); continue; }
-    const na = va[i] - (diff > 0 ? strokesOn(diff, si[i], n) : 0);
-    const nb = vb[i] - (diff < 0 ? strokesOn(-diff, si[i], n) : 0);
+    const na = va[i] - (pa ? pa[i] : diff > 0 ? strokesOn(diff, si[i], n) : 0);
+    const nb = vb[i] - (pb ? pb[i] : diff < 0 ? strokesOn(-diff, si[i], n) : 0);
     const r = na < nb ? 1 : nb < na ? -1 : 0;
     res.push(r); thru++;
     if (closed == null) { up += r; const left = n - (i + 1); if (Math.abs(up) > left) closed = { up, left }; }
@@ -138,9 +146,10 @@ function evalMatch(m) {
     const c = state.courses.find(c => c.id === m.course_id) || {};
     const pars = c.pars?.length === rows[0].holes.length ? c.pars : rows[0].holes.map(() => 4);
     const n = pars.length;
+    const gp = groupPops(Object.fromEntries(rows.map(x => [x.player, roundCh(x.idx, x.r, n)])), pars, c.sis);
     const pairs = pairsOf(rows.map(x => x.player)).map(([a, b]) => {
       const A = rows.find(x => x.player === a), B = rows.find(x => x.player === b);
-      return matchPlay(a, b, A.holes, B.holes, roundCh(A.idx, A.r, n), roundCh(B.idx, B.r, n), pars, c.sis);
+      return matchPlay(a, b, A.holes, B.holes, roundCh(A.idx, A.r, n), roundCh(B.idx, B.r, n), pars, c.sis, gp[a], gp[b]);
     });
     const wins = Object.fromEntries(rows.map(x => [x.player, pairs.filter(p => p.winner === x.player).length]));
     const top = Math.max(...Object.values(wins));
@@ -922,13 +931,10 @@ function cardTotals(card, s) {
 const fmtToPar = d => d === 0 ? "E" : d > 0 ? "+" + d : String(d);
 // Course handicap for each player on this card, from their handicap going in.
 const cardCh = (card, s) => roundCh(currentIndex(s).index, { rating: card.rating, slope: card.slope, par: card.par || card.pars.reduce((a, b) => a + b, 0) }, card.pars.length);
-const cardPts = (card, s) => stableford(holeVals(card, s), card.pars, card.sis, cardCh(card, s));
+const cardPts = (card, s) => stableford(holeVals(card, s), card.pars, card.sis, null, matchPops(card)[s]);
 // Match strokes ("pops"): strokes off the lowest handicap in the group, on the hardest holes.
 function matchPops(card) {
-  const n = card.pars.length, si = strokeIndex(card.pars, card.sis);
-  const chs = Object.fromEntries(card.players.map(s => [s, cardCh(card, s) ?? 0]));
-  const low = Math.min(...Object.values(chs));
-  return Object.fromEntries(card.players.map(s => [s, card.pars.map((_, i) => card.players.length > 1 ? strokesOn(chs[s] - low, si[i], n) : 0)]));
+  return groupPops(Object.fromEntries(card.players.map(s => [s, cardCh(card, s)])), card.pars, card.sis);
 }
 // Who won each hole: lowest net score with match strokes, outright (ties = halved).
 function holeWinners(card, pops) {
@@ -939,7 +945,8 @@ function holeWinners(card, pops) {
     return w.length === 1 ? w[0][0] : null;
   });
 }
-const cardPairs = card => pairsOf(card.players).map(([a, b]) => matchPlay(a, b, holeVals(card, a), holeVals(card, b), cardCh(card, a), cardCh(card, b), card.pars, card.sis));
+const cardPairs = card => { const pp = matchPops(card);
+  return pairsOf(card.players).map(([a, b]) => matchPlay(a, b, holeVals(card, a), holeVals(card, b), cardCh(card, a), cardCh(card, b), card.pars, card.sis, pp[a], pp[b])); };
 // Top of every tab: the round happening now, else today's, else the next one.
 const cardForMatch = id => state.cards.find(c => c.match_id === id);
 const dayName = s => parseDate(s).toLocaleDateString("en-US", { weekday: "long" });

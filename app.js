@@ -83,7 +83,10 @@ function strokesOn(ch, si, n) {
 // Course handicap for this round (9-hole rounds get half).
 function roundCh(idx, c, n) {
   if (idx == null || !c.rating || !c.slope || !c.par) return null;
-  const full = courseHcp(idx, c);
+  // A 9-hole round on an 18-hole course keeps the 18-hole rating but has a 9-hole par: use the 18-hole par here.
+  let par = c.par;
+  if (n === 9 && c.rating >= 50 && c.par < 50) { const cp = state.courses.find(x => x.id === c.course_id)?.par; par = cp >= 50 ? cp : c.par * 2; }
+  const full = courseHcp(idx, { ...c, par });
   return n === 9 ? Math.round(full / 2) : full;
 }
 // Stableford: net double bogey or worse 0, net bogey 1, net par 2, net birdie 3, net eagle 4...
@@ -137,7 +140,7 @@ function evalMatch(m) {
   const rows = rs.map(r => {
     const prior = state.rounds.filter(x => x.player === r.player && x.match_id !== m.id && x.played_on <= m.scheduled_for);
     const idx = effIndex(prior, r.player).index;
-    const ch = courseHcp(idx, r);
+    const ch = roundCh(idx, r, r.holes);
     const net = m.scoring === "gross" ? r.score : r.score - (ch ?? 0);
     return { player: r.player, gross: r.score, idx, ch, net, noHcp: idx == null, points: r.points, holes: r.hole_scores, r };
   }).sort((a, b) => a.net - b.net);
@@ -902,7 +905,7 @@ function wireCoursePicker(form) {
       if (!d.tees.length) return fill(one);
       box.innerHTML = `<div class="muted small">Pick your tees:</div>` + d.tees.map(t => {
         const v = { ...one, tee_name: t.name + (t.gender && !/^m/i.test(t.gender) ? ` (${t.gender[0]})` : ""), rating: t.rating, slope: t.slope, par: t.par || d.par };
-        return `<button type="button" class="opt" data-tee="${encodeURIComponent(JSON.stringify(v))}"><b>${esc(v.tee_name)}</b> ${t.yards ? t.yards + " yds · " : ""}${t.rating}/${t.slope}${v.par ? " · par " + v.par : ""}</button>`;
+        return `<button type="button" class="opt" data-tee="${encodeURIComponent(JSON.stringify(v))}"><b>${esc(v.tee_name)}</b> ${t.yards ? esc(t.yards) + " yds · " : ""}${t.rating}/${t.slope}${v.par ? " · par " + v.par : ""}</button>`;
       }).join("") + `<button type="button" class="opt" data-tee="${encodeURIComponent(JSON.stringify(one))}"><b>Other tees</b> <span class="muted">type them in</span></button>`;
     } catch (err) { fill(base); }
   });
@@ -998,14 +1001,19 @@ function matchForm(mt) {
 
 function resultsForm(mt) {
   const existing = Object.fromEntries(state.rounds.filter(r => r.match_id === mt.id).map(r => [r.player, r]));
+  const nineHoles = c => c?.pars?.length === 9 || (c?.par > 0 && c.par < 50);
+  const holes0 = Object.values(existing)[0]?.holes || (nineHoles(state.courses.find(c => c.id === mt.course_id) || mt) ? 9 : 18);
   openModal(`<h2>Results</h2><p class="hint">${fmtDate(mt.scheduled_for)}${mt.course_name ? " · " + esc(mt.course_name) : ""}</p>
     <form id="xf">
       ${courseFields(mt)}
+      <label>Holes<select name="holes"><option ${holes0 === 18 ? "selected" : ""}>18</option><option ${holes0 === 9 ? "selected" : ""}>9</option></select></label>
       ${mt.players.map(s => `<label>${dot(s)}${esc(pname(s))} final score<input name="s_${s}" inputmode="numeric" value="${existing[s]?.score ?? ""}"></label>`).join("")}
       <p class="hint">Each score is also added to that player's round log. Leave someone blank if they didn't finish.</p>
       <div class="acts"><button class="primary" type="submit">Save results</button></div>
     </form>`, m => {
     const f = $("#xf", m); wireCoursePicker(f);
+    f.holes.onchange = () => { f.dataset.holesSet = "1"; };
+    f.addEventListener("coursepicked", e => { if (!f.dataset.holesSet) f.holes.value = nineHoles(e.detail) ? "9" : "18"; });
     f.onsubmit = async e => {
       e.preventDefault();
       const c = readCourse(f);
@@ -1015,7 +1023,7 @@ function resultsForm(mt) {
       try {
         const course_id = await ensureCourse({ ...c, name: c.course_name });
         for (const [s, v] of scores) {
-          const row = { player: s, played_on: mt.scheduled_for, holes: 18, score: v, course_name: c.course_name, tee_name: c.tee_name,
+          const row = { player: s, played_on: mt.scheduled_for, holes: Number(f.holes.value), score: v, course_name: c.course_name, tee_name: c.tee_name,
             rating: c.rating, slope: c.slope, par: c.par, course_id, match_id: mt.id };
           await save("rounds", row, existing[s]?.id || null);
         }
@@ -1841,7 +1849,7 @@ function finishForm(id) {
         for (const x of done) {
           const cc = { ...card, rating: c.rating, slope: c.slope, par: c.par };
           await save("rounds", { player: x.s, played_on: card.played_on, holes: n, score: x.t.gross, hole_scores: holeVals(card, x.s), points: cardPts(cc, x.s).pts,
-            course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: c.par, course_id, match_id: matchId });
+            course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: n === 9 && c.par >= 50 ? parSum : c.par, course_id, match_id: matchId });
         }
         if (matchId && done.length >= 2) await save("matches", { status: "final", course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: c.par, course_id,
           bets: bet ? { ...card.bets, result: { pays: bet.pays, net: bet.net } } : null }, matchId);

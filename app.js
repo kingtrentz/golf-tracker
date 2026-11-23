@@ -370,9 +370,15 @@ function wireCharts(root) {
 }
 
 // ---------- views ----------
+function renderTabs() {
+  const live = state.cards.length ? `<a href="#live" data-tab="card" class="livetab"><span class="pulse"></span>Live</a>` : "";
+  const html = live + `<a href="#h2h" data-tab="h2h">Head to Head</a>` + PLAYERS.map(p => `<a href="#${p.slug}" data-tab="${p.slug}">${dot(p.slug)}${esc(p.name)}</a>`).join("");
+  const el = $(".tabs"); if (el.innerHTML !== html) el.innerHTML = html;
+}
 function render() {
   const tab = state.tab;
   if (!tab) return;
+  renderTabs();
   document.querySelectorAll(".tabs a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
   const main = $("#main");
   main.innerHTML = tab === "card" ? viewCard(state.cardId) : liveStrip() + (tab === "h2h" ? viewH2H() : viewPlayer(tab));
@@ -931,11 +937,10 @@ function liveStrip() {
     const board = c.players.map(s => ({ s, t: cardTotals(c, s) })).sort((a, b) => (b.t.thru ? 1 : 0) - (a.t.thru ? 1 : 0) || a.t.toPar - b.t.toPar);
     const thru = Math.max(0, ...board.map(x => x.t.thru));
     out.push(`<a class="spot live" href="#card/${c.id}">
-      <div class="sl"><span class="pulse"></span>Current round<span class="sw">${thru ? `thru ${thru}` : "just started"}</span></div>
+      <div class="sl"><span class="pulse"></span>Live now<span class="sw">${thru ? `thru ${thru}` : "just started"}</span></div>
       <div class="sc2">${esc(c.course_name)}${c.tee_name ? `<span class="tee">${esc(c.tee_name)}</span>` : ""}</div>
-      <div class="sb">${board.map(x => `<span>${dot(x.s)}${esc(pname(x.s))} <b>${x.t.thru ? fmtToPar(x.t.toPar) : "–"}</b>${x.t.thru ? ` <span class="muted">${cardPts(c, x.s).pts} pts</span>` : ""}</span>`).join("")}</div>
-      ${c.players.length > 1 ? `<div class="ss">${cardPairs(c).map(pr => esc(pr.text)).join(" · ")}</div>` : ""}
-      <div class="sgo">Open scorecard ›</div></a>`);
+      <div class="sh2">${esc(cardStory(c).head)}</div>
+      <div class="sgo">Open Live ›</div></a>`);
   }
   if (!out.length) {
     const next = state.matches.filter(m => m.status === "scheduled" && !cardForMatch(m.id) && daysBetween(today(), m.scheduled_for) >= 0).sort(byDate)[0];
@@ -1000,37 +1005,118 @@ async function pullCard(id) {
   } else if (data.status === "live") state.cards.push(data);
 }
 
+// ---------- the story so far: headline + highlights ----------
+const holeWord = i => `${i + 1}`;
+function cardStory(card) {
+  const n = card.pars.length, P = card.players;
+  const vals = Object.fromEntries(P.map(s => [s, holeVals(card, s)]));
+  const pts = Object.fromEntries(P.map(s => [s, cardPts(card, s)]));
+  const pairs = P.length > 1 ? cardPairs(card) : [];
+  const moments = []; // {i, text, kind}
+  const thruAll = Math.max(0, ...P.map(s => cardTotals(card, s).thru));
+  // Player moments
+  for (const s of P) {
+    let parRun = 0;
+    vals[s].forEach((v, i) => {
+      if (v == null) { parRun = 0; return; }
+      const d = v - card.pars[i], nm = pname(s);
+      if (d <= -2) moments.push({ i, kind: "great", text: `${d === -2 ? "Eagle" : "Albatross"} for ${nm} on ${holeWord(i)}` });
+      else if (d === -1) moments.push({ i, kind: "good", text: `${nm} birdied ${holeWord(i)}` });
+      else if (d >= 3) moments.push({ i, kind: "bad", text: `${nm} took a ${v} on ${holeWord(i)}` });
+      parRun = d <= 0 ? parRun + 1 : 0;
+      if (parRun >= 3 && (i === n - 1 || vals[s][i + 1] == null || vals[s][i + 1] - card.pars[i + 1] > 0))
+        moments.push({ i, kind: "good", text: `${nm} went ${parRun} straight holes at par or better` });
+    });
+  }
+  // Match moments: lead changes and winning runs
+  for (const pr of pairs) {
+    let up = 0, run = 0, runBy = null;
+    pr.res.forEach((r, i) => {
+      if (r == null) return;
+      const before = up; up += r;
+      const by = r > 0 ? pr.a : r < 0 ? pr.b : null;
+      if (by && by === runBy) run++; else { run = by ? 1 : 0; runBy = by; }
+      if (run === 3) moments.push({ i, kind: "good", text: `${pname(by)} won 3 straight holes against ${pname(by === pr.a ? pr.b : pr.a)}` });
+      if (before <= 0 && up > 0 && before !== 0) moments.push({ i, kind: "swing", text: `${pname(pr.a)} took the lead back on ${holeWord(i)}` });
+      else if (before >= 0 && up < 0 && before !== 0) moments.push({ i, kind: "swing", text: `${pname(pr.b)} took the lead back on ${holeWord(i)}` });
+      else if (before !== 0 && up === 0) moments.push({ i, kind: "swing", text: `${pname(r > 0 ? pr.a : pr.b)} squared it on ${holeWord(i)}` });
+    });
+    if (pr.done) moments.push({ i: n, kind: "great", text: pr.text });
+  }
+  moments.sort((a, b) => b.i - a.i);
+
+  // Headline
+  let head;
+  const ptsLead = [...P].sort((a, b) => pts[b].pts - pts[a].pts);
+  if (!thruAll) {
+    const pr = pairs[0];
+    head = pr ? (pr.getter ? `${pname(pr.getter)} gets ${pr.strokes} from ${pname(pr.getter === pr.a ? pr.b : pr.a)}. First tee, let's go.` : "Playing level. First tee, let's go.") : "First tee, let's go.";
+  } else if (pairs.length === 1) {
+    const pr = pairs[0], lead = pr.up > 0 ? pr.a : pr.up < 0 ? pr.b : null, other = lead === pr.a ? pr.b : pr.a, u = Math.abs(pr.up), left = n - pr.thru;
+    if (pr.done) head = pr.winner ? `${pr.text}.` : "Halved. Nobody blinked.";
+    else if (!lead) head = `All square thru ${pr.thru}. Nobody's blinking.`;
+    else if (u === left) head = `${pname(lead)} is dormie, ${u} up with ${left} to play. ${pname(other)} has to win out.`;
+    else if (u >= 4) head = `${pname(lead)} is running away with it, ${u} up thru ${pr.thru}.`;
+    else if (u === 3) head = `${pname(lead)} is dominating, 3 up thru ${pr.thru}.`;
+    else head = `${pname(lead)} ${u} up thru ${pr.thru}. ${u === 1 ? "Tight one." : "Still a match."}`;
+  } else if (pairs.length > 1) {
+    const ahead = P.find(s => pairs.filter(pr => pr.a === s || pr.b === s).every(pr => pr.winner === s || (!pr.done && ((pr.a === s && pr.up > 0) || (pr.b === s && pr.up < 0)))));
+    if (pairs.every(pr => pr.done)) head = ahead ? `${pname(ahead)} swept both matches.` : `Matches done. ${pname(ptsLead[0])} won on points with ${pts[ptsLead[0]].pts}.`;
+    else if (ahead) head = `${pname(ahead)} is dominating, up in both matches thru ${thruAll}.`;
+    else head = `${pname(ptsLead[0])} leads on points with ${pts[ptsLead[0]].pts} thru ${thruAll}. Matches are up for grabs.`;
+  } else head = `${pts[P[0]].pts} points thru ${thruAll}.`;
+  return { head, moments, pairs, pts, thruAll };
+}
+
 function viewCard(id) {
   const card = cardById(id);
-  if (!card) return `<section class="card"><a href="#h2h" class="back">‹ Back</a><div class="empty">This scorecard is finished or was deleted.</div></section>`;
+  if (!card) return `<section class="card"><div class="empty">No round in progress. Start one from + or an upcoming round.</div></section>`;
   const n = card.pars.length;
   const hole = Math.min(n - 1, Math.max(0, Number(localStorage.getItem("golf_hole_" + id) ?? firstOpenHole(card))));
   const ed = editing();
-  const board = card.players.map(s => ({ s, t: cardTotals(card, s), p: cardPts(card, s), ch: cardCh(card, s) }))
-    .sort((a, b) => (b.t.thru ? 1 : 0) - (a.t.thru ? 1 : 0) || b.p.pts - a.p.pts || a.t.toPar - b.t.toPar);
-  const pairs = card.players.length > 1 ? cardPairs(card) : [];
+  const st = cardStory(card);
   const si = strokeIndex(card.pars, card.sis);
-  const noRating = !card.rating || !card.slope;
+  const two = st.pairs.length === 1 ? st.pairs[0] : null;
+  const chip = s => { if (!two || !two.thru) return ""; const me = (s === two.a ? 1 : -1) * two.up;
+    return me > 0 ? `<span class="mchip up">${me} UP</span>` : me === 0 ? `<span class="mchip as">AS</span>` : ""; };
+  const board = card.players.map(s => ({ s, t: cardTotals(card, s), p: st.pts[s], ch: cardCh(card, s) }))
+    .sort((a, b) => (b.t.thru ? 1 : 0) - (a.t.thru ? 1 : 0) || b.p.pts - a.p.pts || a.t.toPar - b.t.toPar);
+  const others = state.cards.filter(c => c.id !== id);
+
+  const top = `<section class="card live-top">
+    ${others.length ? `<div class="chips cardsw">${state.cards.map(c => `<a class="chip ${c.id === id ? "on" : ""}" href="#card/${c.id}">${esc(splitName(c.course_name).base)}</a>`).join("")}</div>` : ""}
+    <div class="lt-meta"><span class="pulse"></span><span>${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span class="lt-thru">${st.thruAll ? `thru ${st.thruAll}` : fmtShort(card.played_on)}</span></div>
+    <div class="headline">${esc(st.head)}</div>
+    ${st.moments[0] && st.thruAll && !st.head.startsWith(st.moments[0].text) ? `<div class="latest">Latest: ${esc(st.moments[0].text)}</div>` : ""}
+    <div class="lboard">${board.map(x => `<div class="lrow">
+      <span class="lname">${dot(x.s)}${esc(pname(x.s))}${chip(x.s)}</span>
+      <span class="lscore">${x.t.thru ? `<b>${fmtToPar(x.t.toPar)}</b><small>${x.t.gross}</small>` : `<span class="muted">–</span>`}</span>
+      <span class="lpts">${x.t.thru ? `<b>${x.p.pts}</b><small>pts</small>` : ""}</span></div>`).join("")}</div>
+    ${st.pairs.length > 1 ? `<div class="mlines">${st.pairs.map(pr => `<span>${esc(pname(pr.a))} v ${esc(pname(pr.b))}: <b>${esc(pr.text.replace(/ thru \d+$/, ""))}</b></span>`).join("")}</div>` : ""}
+    <div class="hcpline">${st.pairs.map(pr => pr.getter ? `${esc(pname(pr.getter))} gets ${pr.strokes} from ${esc(pname(pr.getter === pr.a ? pr.b : pr.a))}` : `${esc(pname(pr.a))} and ${esc(pname(pr.b))} play level`).join(" · ")}${board.some(x => x.ch != null) ? ` · course hcp ${board.map(x => `${esc(pname(x.s))} ${x.ch ?? "–"}`).join(", ")}` : ""}</div>
+    ${!card.rating || !card.slope ? `<div class="warnt small">Add the course rating and slope (Finish round) so handicap strokes count.</div>` : ""}
+    ${card.sis?.length === n ? "" : `<div class="muted small">No hole handicaps saved for this course, so strokes use the standard order. <button class="link ed" data-act="cardsc" data-id="${id}">Edit scorecard</button></div>`}
+  </section>`;
 
   const entry = ed ? `<section class="card hole">
       <div class="hhead">
         <button class="nav" data-act="hole" data-v="${hole - 1}" ${hole === 0 ? "disabled" : ""} aria-label="Previous hole">‹</button>
-        <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="cardsc" data-id="${id}">Par ${card.pars[hole]} · Hcp ${si[hole]} <span class="muted">edit scorecard</span></button></div>
+        <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="cardsc" data-id="${id}">Par ${card.pars[hole]} · Hcp ${si[hole]}</button></div>
         <button class="nav" data-act="hole" data-v="${hole + 1}" ${hole === n - 1 ? "disabled" : ""} aria-label="Next hole">›</button>
       </div>
       ${card.players.map(s => {
-        const v = holeVals(card, s)[hole]; const t = cardTotals(card, s);
-        const gets = strokesOn(cardCh(card, s) ?? 0, si[hole], n); const hp = cardPts(card, s).per[hole];
+        const v = holeVals(card, s)[hole];
+        const gets = strokesOn(cardCh(card, s) ?? 0, si[hole], n); const hp = st.pts[s].per[hole];
         return `<div class="prow">
-          <div class="pn">${dot(s)}${esc(pname(s))}${gets > 0 ? `<span class="sdots" title="strokes on this hole">${"●".repeat(Math.min(gets, 3))}</span>` : ""}<div class="ps">${hp != null ? `${hp} pt${hp === 1 ? "" : "s"} here · ` : ""}${t.thru ? `${cardPts(card, s).pts} pts thru ${t.thru}` : "no score yet"}</div></div>
+          <div class="pn">${dot(s)}${esc(pname(s))}${gets > 0 ? `<span class="sdots" title="handicap strokes on this hole">${"●".repeat(Math.min(gets, 3))}</span>` : ""}<div class="ps">${hp != null ? `${hp} pt${hp === 1 ? "" : "s"}` : gets > 0 ? `gets ${gets}` : "&nbsp;"}</div></div>
           <button class="step" data-act="sc" data-s="${s}" data-d="-1" aria-label="${esc(pname(s))} one less">−</button>
           <button class="val ${v == null ? "empty" : scoreCls(v, card.pars[hole])}" data-act="sc" data-s="${s}" data-d="0" aria-label="${esc(pname(s))} score">${v ?? card.pars[hole]}</button>
           <button class="step" data-act="sc" data-s="${s}" data-d="1" aria-label="${esc(pname(s))} one more">+</button>
         </div>`;
       }).join("")}
       <div class="hfoot"><span id="savestate" class="savestate"></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Finish round</button>`}</div>
-      <p class="hint">Tap the number to give par. Use − and + for anything else. ● = handicap strokes on this hole (Stableford).</p>
-    </section>` : `<p class="hint">Scores update by themselves. Tap Enter scores up top to keep score.</p>`;
+      <p class="hint">Tap the number for par, − and + for anything else. ● = handicap stroke here.</p>
+    </section>` : `<p class="hint center">Updates by itself. Tap Enter scores to keep score.</p>`;
 
   const grid = half => {
     const idx = half === 0 ? [...Array(Math.min(9, n)).keys()] : [...Array(n - 9).keys()].map(i => i + 9);
@@ -1041,21 +1127,14 @@ function viewCard(id) {
       <tbody>${card.players.map(s => { const v = holeVals(card, s); const got = idx.filter(i => v[i] != null);
         return `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}</td>${idx.map(i => `<td><span class="${v[i] == null ? "" : scoreCls(v[i], card.pars[i])}">${v[i] ?? ""}</span></td>`).join("")}<td><b>${got.length ? sum(got.map(i => v[i])) : ""}</b></td></tr>`; }).join("")}</tbody></table>`;
   };
+  const hl = st.moments.filter(m => m.i < n || m.kind === "great");
+  const highlights = hl.length ? `<section class="card"><h3>Highlights</h3><div class="moments">${hl.slice(0, 6).map(m => `<div class="mom ${m.kind}"><span class="mh2">${m.i < n ? m.i + 1 : "F"}</span>${esc(m.text)}</div>`).join("")}</div>
+    ${hl.length > 6 ? `<details><summary class="muted small">Show all ${hl.length}</summary><div class="moments">${hl.slice(6).map(m => `<div class="mom ${m.kind}"><span class="mh2">${m.i < n ? m.i + 1 : "F"}</span>${esc(m.text)}</div>`).join("")}</div></details>` : ""}</section>` : "";
 
-  return `<a href="#h2h" class="back">‹ Back</a>
-  <section class="card cardtop">
-    <div class="ct"><span class="pulse"></span>Live scorecard</div>
-    <div class="cc">${esc(card.course_name)}${card.tee_name ? `<span class="tee">${esc(card.tee_name)}</span>` : ""}</div>
-    <div class="muted small">${fmtDate(card.played_on)} · ${n} holes${card.match_id ? " · match" : ""}</div>
-    <div class="board"><div class="bh"><span></span><span>Score</span><span>Pts</span></div>${board.map((x, i) => `<div class="br3"><span>${dot(x.s)}${esc(pname(x.s))}<span class="chs">${x.ch == null ? "" : "hcp " + x.ch}</span></span><span class="n">${x.t.thru ? `${x.t.gross} <span class="muted">${fmtToPar(x.t.toPar)} · ${x.t.thru}</span>` : `<span class="muted">–</span>`}</span><span class="n"><b>${x.t.thru ? x.p.pts : "–"}</b></span></div>`).join("")}</div>
-    ${pairs.length ? `<div class="mpl"><div class="mpt">Match play</div>${pairs.map(pr => `<div class="mpr"><span>${dot(pr.a)}${esc(pname(pr.a))} <span class="muted">v</span> ${dot(pr.b)}${esc(pname(pr.b))}</span><b class="${pr.done ? "fin" : ""}">${esc(pr.text)}</b></div>`).join("")}
-      <div class="muted small">${pairs.map(pr => pr.getter ? `${esc(pname(pr.getter))} gets ${pr.strokes} vs ${esc(pname(pr.getter === pr.a ? pr.b : pr.a))}` : `${esc(pname(pr.a))} and ${esc(pname(pr.b))} play level`).join(" · ")}${card.sis?.length === card.pars.length ? "" : ". Hole handicaps aren't saved for this course yet, so strokes use the standard odd/even order. Fix it with Edit scorecard."}</div></div>` : ""}
-    ${noRating ? `<div class="warnt small">Add the course rating and slope (Finish round) so handicap strokes count.</div>` : ""}
-  </section>
-  ${entry}
+  return `${top}${entry}${highlights}
   <section class="card"><h3>Scorecard</h3>${grid(0)}${grid(1)}
     <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span></div></section>
-  <div class="ed acts"><button class="link" data-act="cardsc" data-id="${id}">Edit scorecard (pars and hole handicaps)</button><button class="link" data-act="card-del" data-id="${id}">Delete this scorecard</button></div>`;
+  <div class="ed acts center"><button class="link" data-act="cardsc" data-id="${id}">Edit scorecard</button><button class="link" data-act="card-del" data-id="${id}">Delete scorecard</button></div>`;
 }
 const scoreCls = (v, par) => v < par - 1 ? "sc-e" : v === par - 1 ? "sc-b" : v === par ? "sc-p" : v === par + 1 ? "sc-o" : "sc-d";
 function firstOpenHole(card) {
@@ -1275,6 +1354,7 @@ async function refresh() {
 function route() {
   const h = location.hash.slice(1);
   if (h.startsWith("card/")) { state.tab = "card"; state.cardId = h.slice(5); }
+  else if (h === "live" || (!h && state.cards.length)) { state.tab = "card"; state.cardId = state.cards[0]?.id || null; }
   else state.tab = P[h] || h === "h2h" ? h : "h2h";
   render();
   startPolling();
@@ -1307,7 +1387,7 @@ document.addEventListener("change", e => {
   document.title = CFG.siteTitle;
   $("#title").textContent = CFG.siteTitle;
   $("#tagline").textContent = CFG.tagline || "";
-  $(".tabs").innerHTML = `<a href="#h2h" data-tab="h2h">Head to Head</a>` + PLAYERS.map(p => `<a href="#${p.slug}" data-tab="${p.slug}">${dot(p.slug)}${esc(p.name)}</a>`).join("");
+  renderTabs();
   if (DEMO) $("#demo").hidden = false;
   else {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");

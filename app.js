@@ -503,7 +503,7 @@ function viewH2H() {
       <div class="mp">${m.players.map(s => `<span>${dot(s)}${esc(pname(s))}</span>`).join(" vs ")}</div>
       ${hasCourse && m.scoring !== "gross" ? strokesLine(m, m.players) : ""}
       ${m.notes ? `<div class="note">${esc(m.notes)}</div>` : ""}
-      ${live ? `<div class="acts"><a class="btnlink" href="#card/${live.id}">Open scorecard ›</a></div>` : `<div class="ed acts">${d <= 0 ? `<button class="primary" data-act="start-card" data-id="${m.id}">Start scorecard</button>` : ""}<button data-act="results" data-id="${m.id}">Post results</button><button class="link" data-act="edit-match" data-id="${m.id}">Edit</button></div>`}
+      ${live ? `<div class="acts"><a class="btnlink" href="#card/${live.id}">Open scorecard ›</a></div>` : `<div class="ed acts"><button class="primary" data-act="start-match" data-id="${m.id}">Start match</button><button data-act="results" data-id="${m.id}">Post results</button><button class="link" data-act="edit-match" data-id="${m.id}">Edit</button></div>`}
     </div>`;
   }).join("");
 
@@ -975,8 +975,7 @@ function liveStrip() {
         <div class="sc2">${esc(next.course_name || "Course TBD")}${next.tee_name ? `<span class="tee">${esc(next.tee_name)}</span>` : ""}${isTitle(next) ? `<span class="tag gold">🏆 title match</span>` : ""}</div>
         <div class="sb">${next.players.map(s => `<span>${dot(s)}${esc(pname(s))}</span>`).join(`<span class="muted">vs</span>`)}</div>
         ${hasCourse && next.scoring !== "gross" ? strokesLine(next, next.players) : ""}
-        ${isToday ? `<div class="acts"><button class="primary" data-act="start-card" data-id="${next.id}">Start scorecard</button></div>`
-          : `<div class="ss">Becomes the live scorecard when you tee off.</div>`}
+        <div class="acts"><button class="primary${isToday ? " big" : ""}" data-act="start-match" data-id="${next.id}">Start match</button>${isToday ? "" : `<span class="ss">Tap when you tee off.</span>`}</div>
       </section>`);
     }
   }
@@ -1279,6 +1278,61 @@ function scorecardsSection() {
     <p class="hint">Tap Enter scores to edit.</p></details></section>`;
 }
 
+// ---------- start match: pick tees, then straight to the Live tab ----------
+function startMatch(mt) {
+  if (!mt) return;
+  if (!editing()) return phraseForm(() => startMatch(mt));
+  const existing = cardForMatch(mt.id);
+  if (existing) { location.hash = "card/" + existing.id; return; }
+  const tees = state.courses.filter(c => mt.course_name && c.name === mt.course_name).sort((a, b) => b.rating - a.rating);
+  if (!tees.length) return cardForm(mt); // course not saved yet: full form (course, tees, ratings)
+  let pick = tees.find(t => t.tee_name === mt.tee_name) || tees[Math.floor(tees.length / 2)];
+  const has18 = tees[0].pars?.length !== 9;
+  openModal(`<h2>Start match</h2>
+    <p class="hint">${esc(mt.course_name)} · ${mt.players.map(pname).map(esc).join(" vs ")}${mt.scoring === "match" ? " · match play" : ""}</p>
+    <div class="laylbl">What tees are you playing?</div>
+    <div class="teepick">${tees.map(t => `<button type="button" class="teeopt ${t.id === pick.id ? "on" : ""}" data-tee="${t.id}"><b>${esc(t.tee_name || "Tees")}</b><span>${t.rating}/${t.slope}</span></button>`).join("")}</div>
+    ${has18 ? `<div class="laylbl">Holes</div><div class="seg2"><button type="button" class="on" data-holes="18">18</button><button type="button" data-holes="9">Front 9</button></div>` : ""}
+    <div id="smstrokes" class="hint"></div>
+    <div class="acts"><button class="primary big" id="teeoff">Tee off ›</button></div>
+    <p class="muted small">Not the right course? <button class="link" id="smfull">Change course or players</button></p>`, m => {
+    let holes = has18 ? 18 : 9;
+    const preview = () => {
+      const c = { rating: pick.rating, slope: pick.slope, par: pick.par };
+      const chs = Object.fromEntries(mt.players.map(s => [s, roundCh(currentIndex(s).index, c, holes)]));
+      const vals = Object.values(chs).filter(x => x != null);
+      if (vals.length < mt.players.length) { $("#smstrokes", m).textContent = ""; return; }
+      const low = Math.min(...vals);
+      $("#smstrokes", m).textContent = mt.players.map(s => chs[s] - low > 0 ? `${pname(s)} gets ${chs[s] - low}` : null).filter(Boolean).join(" · ") || "Everyone plays level.";
+    };
+    m.querySelector(".teepick").onclick = e => { const b = e.target.closest("[data-tee]"); if (!b) return;
+      pick = tees.find(t => t.id === b.dataset.tee); m.querySelectorAll(".teeopt").forEach(x => x.classList.toggle("on", x === b)); preview(); };
+    const seg = m.querySelector(".seg2"); if (seg) seg.onclick = e => { const b = e.target.closest("[data-holes]"); if (!b) return;
+      holes = Number(b.dataset.holes); seg.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); preview(); };
+    $("#smfull", m).onclick = () => cardForm(mt);
+    preview();
+    $("#teeoff", m).onclick = async () => {
+      const btn = $("#teeoff", m); btn.disabled = true; btn.textContent = "Starting…";
+      try {
+        const n = holes;
+        const pars = pick.pars?.length >= n ? pick.pars.slice(0, n) : Array(n).fill(4);
+        let sis = null;
+        if (pick.sis?.length === 18) { const s9 = pick.sis.slice(0, n); sis = n === 9 ? s9.map(x => s9.filter(y => y < x).length + 1) : pick.sis; }
+        else if (pick.sis?.length === n) sis = pick.sis;
+        // 18-hole rating/slope/par are kept; course handicap is halved for 9 holes.
+        const par = pick.par, rating = pick.rating;
+        // Keep the round's tee in sync with what's being played.
+        await save("matches", { course_id: pick.id, tee_name: pick.tee_name, rating: pick.rating, slope: pick.slope, par: pick.par }, mt.id);
+        const id = await save("cards", { played_on: today(), course_id: pick.id, course_name: pick.name, tee_name: pick.tee_name,
+          rating, slope: pick.slope, par, pars, sis, players: mt.players, scores: {}, match_id: mt.id,
+          scoring: mt.scoring || "match", status: "live" });
+        localStorage.setItem("golf_hole_" + id, "0");
+        closeModal(); await loadData(); location.hash = "card/" + id;
+      } catch (err) { btn.disabled = false; btn.textContent = "Tee off ›"; toast("Couldn't start: " + errMsg(err)); }
+    };
+  });
+}
+
 function cardForm(fromMatch) {
   if (!editing()) return phraseForm(() => cardForm(fromMatch));
   const todays = state.matches.filter(m => m.status === "scheduled" && Math.abs(daysBetween(today(), m.scheduled_for)) <= 1);
@@ -1406,6 +1460,7 @@ document.addEventListener("click", e => {
   if (act === "new-match") matchForm();
   if (act === "edit-start") startForm(id);
   if (act === "start-card") cardForm(state.matches.find(m => m.id === id));
+  if (act === "start-match") startMatch(state.matches.find(m => m.id === id));
   if (act === "finish") finishForm(id);
   if (act === "cardsc") cardScorecard(id);
   if (act === "course-sc") courseScorecard(id);

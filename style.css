@@ -335,3 +335,16 @@ h3.inl { display: inline; }
 .legend2 .wonk { width: 12px; height: 12px; border-radius: 3px; background: #183a26; }
 .hwin { color: #8fe0ad; }
 .hhalf { color: var(--text-2); }
+
+/* start match */
+.teepick { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; margin-bottom: 12px; }
+.teeopt { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 12px 6px; border-radius: 12px; }
+.teeopt b { font-size: 16px; }
+.teeopt span { font-size: 12px; color: var(--muted); }
+.teeopt.on { background: var(--accent); border-color: var(--accent); color: #06140b; }
+.teeopt.on span { color: #0b3a1f; }
+.seg2 { display: inline-flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
+.seg2 button { border: 0; border-radius: 0; padding: 8px 16px; }
+.seg2 button.on { background: var(--accent); color: #06140b; font-weight: 700; }
+button.primary.big { width: 100%; padding: 14px; font-size: 17px; }
+.spot .acts .ss { margin: 0 0 0 4px; }

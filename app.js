@@ -519,7 +519,8 @@ function viewH2H() {
   <section class="card"><h3>Handicap race</h3>${lineChart(PLAYERS.map(p => ({ name: p.name, color: p.color, points: indexHistory(p.slug) })))}</section>
   <section class="card"><h3>Head to head</h3><p class="hint">Every final match counts, scored the way it was set up (net or gross).</p>${recs}</section>
   ${calc}
-  <section class="card"><h3>Results</h3>${pastRows || `<div class="empty">No results yet.</div>`}</section>`;
+  <section class="card"><h3>Results</h3>${pastRows || `<div class="empty">No results yet.</div>`}</section>
+  ${scorecardsSection()}`;
 }
 
 // ---------- modals & forms ----------
@@ -995,7 +996,7 @@ function viewCard(id) {
   const entry = ed ? `<section class="card hole">
       <div class="hhead">
         <button class="nav" data-act="hole" data-v="${hole - 1}" ${hole === 0 ? "disabled" : ""} aria-label="Previous hole">‹</button>
-        <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="par" data-v="${hole}">Par ${card.pars[hole]} · Hcp ${si[hole]} <span class="muted">change par</span></button></div>
+        <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="cardsc" data-id="${id}">Par ${card.pars[hole]} · Hcp ${si[hole]} <span class="muted">edit scorecard</span></button></div>
         <button class="nav" data-act="hole" data-v="${hole + 1}" ${hole === n - 1 ? "disabled" : ""} aria-label="Next hole">›</button>
       </div>
       ${card.players.map(s => {
@@ -1029,13 +1030,13 @@ function viewCard(id) {
     <div class="muted small">${fmtDate(card.played_on)} · ${n} holes${card.match_id ? " · match" : ""}</div>
     <div class="board"><div class="bh"><span></span><span>Score</span><span>Pts</span></div>${board.map((x, i) => `<div class="br3"><span>${dot(x.s)}${esc(pname(x.s))}<span class="chs">${x.ch == null ? "" : "hcp " + x.ch}</span></span><span class="n">${x.t.thru ? `${x.t.gross} <span class="muted">${fmtToPar(x.t.toPar)} · ${x.t.thru}</span>` : `<span class="muted">–</span>`}</span><span class="n"><b>${x.t.thru ? x.p.pts : "–"}</b></span></div>`).join("")}</div>
     ${pairs.length ? `<div class="mpl"><div class="mpt">Match play</div>${pairs.map(pr => `<div class="mpr"><span>${dot(pr.a)}${esc(pname(pr.a))} <span class="muted">v</span> ${dot(pr.b)}${esc(pname(pr.b))}</span><b class="${pr.done ? "fin" : ""}">${esc(pr.text)}</b></div>`).join("")}
-      <div class="muted small">${pairs.map(pr => pr.getter ? `${esc(pname(pr.getter))} gets ${pr.strokes} vs ${esc(pname(pr.getter === pr.a ? pr.b : pr.a))}` : `${esc(pname(pr.a))} and ${esc(pname(pr.b))} play level`).join(" · ")}${card.sis?.length === card.pars.length ? "" : ". Hole handicaps not saved for this course, so strokes use the standard odd/even order."}</div></div>` : ""}
+      <div class="muted small">${pairs.map(pr => pr.getter ? `${esc(pname(pr.getter))} gets ${pr.strokes} vs ${esc(pname(pr.getter === pr.a ? pr.b : pr.a))}` : `${esc(pname(pr.a))} and ${esc(pname(pr.b))} play level`).join(" · ")}${card.sis?.length === card.pars.length ? "" : ". Hole handicaps aren't saved for this course yet, so strokes use the standard odd/even order. Fix it with Edit scorecard."}</div></div>` : ""}
     ${noRating ? `<div class="warnt small">Add the course rating and slope (Finish round) so handicap strokes count.</div>` : ""}
   </section>
   ${entry}
   <section class="card"><h3>Scorecard</h3>${grid(0)}${grid(1)}
     <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span></div></section>
-  <div class="ed acts"><button class="link" data-act="card-del" data-id="${id}">Delete this scorecard</button></div>`;
+  <div class="ed acts"><button class="link" data-act="cardsc" data-id="${id}">Edit scorecard (pars and hole handicaps)</button><button class="link" data-act="card-del" data-id="${id}">Delete this scorecard</button></div>`;
 }
 const scoreCls = (v, par) => v < par - 1 ? "sc-e" : v === par - 1 ? "sc-b" : v === par ? "sc-p" : v === par + 1 ? "sc-o" : "sc-d";
 function firstOpenHole(card) {
@@ -1062,6 +1063,86 @@ function cardAction(act, b) {
     card.pars = card.pars.map((x, i) => i === h ? (p >= 5 ? 3 : p + 1) : x);
     render(); queueSave(card, "__pars");
   }
+}
+
+// ---------- edit scorecard (hole pars + hole handicaps) ----------
+// Type what's printed on the paper card. Any unique handicap numbers work
+// (a 9-hole card printed 1,3,5... gets ranked 1-9 automatically).
+function scorecardForm({ title, sub, pars, sis, saveCourseOpt, onSave }) {
+  const n = pars.length;
+  const row = i => `<div class="sr"><span class="sh">${i + 1}</span>
+    <div class="seg">${[3, 4, 5, 6].map(p => `<button type="button" class="${pars[i] === p ? "on" : ""}" data-h="${i}" data-p="${p}">${p}</button>`).join("")}</div>
+    <input name="si${i}" inputmode="numeric" value="${sis?.[i] ?? ""}" aria-label="Hole ${i + 1} handicap"></div>`;
+  const half = (a, b, lbl) => `<div class="sgrp"><div class="sr head"><span>${lbl}</span><span>Par</span><span>Hcp</span></div>${[...Array(b - a).keys()].map(k => row(a + k)).join("")}
+    <div class="sr tot"><span>Total</span><span class="ptot" data-a="${a}" data-b="${b}"></span><span></span></div></div>`;
+  openModal(`<h2>${esc(title)}</h2>${sub ? `<p class="hint">${esc(sub)}</p>` : ""}
+    <form id="scf">
+      <p class="hint">Copy par and handicap (HCP) for each hole from the scorecard. Leave handicaps blank if the card doesn't list them.</p>
+      ${n === 18 ? half(0, 9, "Out") + half(9, 18, "In") : half(0, n, "Hole")}
+      <div class="sr tot grand" ${n === 18 ? "" : "hidden"}><span>Par</span><span id="pgrand"></span><span></span></div>
+      ${saveCourseOpt ? `<label class="chk"><input type="checkbox" name="tocourse" checked> Save to ${esc(saveCourseOpt)} for next time</label>` : ""}
+      <div class="acts"><button class="primary" type="submit">Save scorecard</button></div>
+    </form>`, m => {
+    const f = $("#scf", m); const P = [...pars];
+    const totals = () => { f.querySelectorAll(".ptot").forEach(el => el.textContent = P.slice(+el.dataset.a, +el.dataset.b).reduce((x, y) => x + y, 0)); $("#pgrand", m).textContent = P.reduce((x, y) => x + y, 0); };
+    f.addEventListener("click", e => { const b = e.target.closest("[data-p]"); if (!b) return;
+      P[+b.dataset.h] = +b.dataset.p; b.parentNode.querySelectorAll("button").forEach(x => x.classList.toggle("on", x === b)); totals(); });
+    totals();
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const raw = P.map((_, i) => f["si" + i].value.trim());
+      let S = null;
+      if (raw.some(Boolean)) {
+        if (raw.some(x => !x)) return toast("Fill every hole's handicap, or leave them all blank.");
+        const nums = raw.map(Number);
+        if (nums.some(x => !Number.isInteger(x) || x < 1 || x > 36)) return toast("Handicaps are whole numbers from the card.");
+        if (new Set(nums).size !== n) return toast("Two holes have the same handicap. Check the card.");
+        const sorted = [...nums].sort((a, b) => a - b);
+        S = nums.map(x => sorted.indexOf(x) + 1);
+      }
+      const btn = f.querySelector("[type=submit]"); btn.disabled = true;
+      try { await onSave(P, S, !!f.tocourse?.checked); closeModal(); await refresh(); toast("Scorecard saved."); }
+      catch (err) { btn.disabled = false; toast("Couldn't save: " + errMsg(err)); }
+    };
+  });
+}
+// Save pars/handicaps onto every saved tee of a course.
+async function saveCourseCard(name, pars, sis) {
+  const rows = state.courses.filter(c => c.name === name);
+  const par = pars.reduce((a, b) => a + b, 0);
+  for (const c of rows) await save("courses", { pars, sis, par }, c.id);
+}
+function cardScorecard(id) {
+  const card = cardById(id); if (!card) return;
+  if (!editing()) return phraseForm(() => cardScorecard(id));
+  const course = state.courses.find(c => c.name === card.course_name);
+  const n = card.pars.length;
+  scorecardForm({ title: "Edit scorecard", sub: card.course_name, pars: card.pars, sis: card.sis?.length === n ? card.sis : null,
+    saveCourseOpt: course && (n === 18 || course.pars?.length === n || !course.pars) ? card.course_name : null,
+    onSave: async (pars, sis, toCourse) => {
+      await flushSaves();
+      await save("cards", { pars, sis }, id);
+      Object.assign(card, { pars, sis });
+      if (toCourse) await saveCourseCard(card.course_name, pars, sis);
+    } });
+}
+function courseScorecard(name) {
+  if (!editing()) return phraseForm(() => courseScorecard(name));
+  const c = state.courses.find(x => x.name === name); if (!c) return;
+  const n = c.pars?.length || (c.par && c.par < 50 ? 9 : 18);
+  const pars = c.pars?.length === n ? c.pars : Array(n).fill(4);
+  scorecardForm({ title: "Edit scorecard", sub: name, pars, sis: c.sis?.length === n ? c.sis : null,
+    onSave: (p, s) => saveCourseCard(name, p, s) });
+}
+function scorecardsSection() {
+  const names = [...new Set(state.courses.map(c => c.name))].sort();
+  if (!names.length) return "";
+  return `<section class="card"><details><summary><h3 class="inl">Course scorecards</h3> <span class="muted small">${names.length}</span></summary>
+    ${names.map(n => { const rows = state.courses.filter(c => c.name === n); const c = rows[0];
+      const ok = c.pars?.length && c.sis?.length === c.pars.length;
+      return `<div class="crow"><div><b>${esc(n)}</b><div class="muted small">${rows.length} tee${rows.length === 1 ? "" : "s"} · ${c.pars?.length ? `par ${c.pars.reduce((a, b) => a + b, 0)}` : "no hole pars"} · ${ok ? "hole handicaps saved" : `<span class="warnt">missing hole handicaps</span>`}</div></div>
+        <button class="link ed" data-act="course-sc" data-id="${esc(n)}">Edit</button></div>`; }).join("")}
+    <p class="hint">Tap Enter scores to edit.</p></details></section>`;
 }
 
 function cardForm(fromMatch) {
@@ -1191,6 +1272,8 @@ document.addEventListener("click", e => {
   if (act === "edit-start") startForm(id);
   if (act === "start-card") cardForm(state.matches.find(m => m.id === id));
   if (act === "finish") finishForm(id);
+  if (act === "cardsc") cardScorecard(id);
+  if (act === "course-sc") courseScorecard(id);
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
   if (["hole", "sc", "par"].includes(act)) cardAction(act, b);
 });

@@ -1,0 +1,13 @@
+name: keep database awake
+# Free Supabase projects pause after a week with no traffic. This reads one row every 3 days.
+on:
+  schedule:
+    - cron: "17 14 */3 * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -fsS "https://vqgyeqrjvghrzxrirkff.supabase.co/rest/v1/players?select=slug&limit=1" \
+            -H "apikey: sb_publishable_pS1HaPnUl9XG3E9uusrQHw_cbul3r1I" > /dev/null && echo "database awake"

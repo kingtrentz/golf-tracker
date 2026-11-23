@@ -10,7 +10,7 @@ const DEMO = !CFG.supabaseUrl || !CFG.supabaseAnonKey;
 const OGAPI = "https://api.opengolfapi.org";
 
 let sb = null;
-const state = { rounds: [], matches: [], courses: [], start: {}, user: null, tab: null };
+const state = { rounds: [], matches: [], courses: [], cards: [], start: {}, phrase: localStorage.getItem("golf_phrase"), tab: null, cardId: null };
 // Starting handicaps are used until a player has this many full rounds posted.
 const START_UNTIL = CFG.startingIndexRounds ?? 5;
 
@@ -132,52 +132,97 @@ function championship() {
 }
 
 // ---------- data ----------
+// Reads are public. Every write goes through a database function that checks
+// the family security phrase on the server, so the phrase is never in this code.
 async function loadData() {
   if (DEMO) {
     if (state._demoLoaded) return;
     state._demoLoaded = true;
     const d = JSON.parse(JSON.stringify(window.GOLF_DEMO));
     Object.assign(state, d);
+    state.cards = state.cards || [];
     return;
   }
-  const [r, m, c, pl] = await Promise.all([
+  const [r, m, c, pl, cd] = await Promise.all([
     sb.from("rounds").select("*").order("played_on"),
     sb.from("matches").select("*").order("scheduled_for"),
     sb.from("courses").select("*").order("name"),
-    sb.from("players").select("*")
+    sb.from("players").select("*"),
+    sb.from("cards").select("*").eq("status", "live").order("created_at")
   ]);
   for (const x of [r, m, c]) if (x.error) throw x.error;
   state.start = Object.fromEntries((pl.data || []).filter(x => x.starting_index != null).map(x => [x.slug, Number(x.starting_index)]));
   state.rounds = r.data.map(x => ({ ...x, rating: Number(x.rating), slope: Number(x.slope), par: Number(x.par) }));
   state.matches = m.data.map(x => ({ ...x, rating: x.rating == null ? null : Number(x.rating), slope: x.slope == null ? null : Number(x.slope), par: x.par == null ? null : Number(x.par) }));
   state.courses = c.data.map(x => ({ ...x, rating: Number(x.rating), slope: Number(x.slope), par: Number(x.par) }));
+  state.cards = (cd.data || []).map(x => ({ ...x, rating: x.rating == null ? null : Number(x.rating) }));
 }
 
+async function rpc(fn, args) {
+  const { data, error } = await sb.rpc(fn, { p: state.phrase || "", ...args });
+  if (error) {
+    if (/security phrase/i.test(error.message)) lock(true);
+    throw error;
+  }
+  return data;
+}
 async function save(table, row, id) {
   if (DEMO) {
-    const list = state[table];
+    const list = state[table] ||= [];
     if (id) Object.assign(list.find(x => x.id === id), row);
     else { row.id = uid(); row.created_at = new Date().toISOString(); list.push(row); }
     return row.id || id;
   }
-  const q = id ? sb.from(table).update(row).eq("id", id).select().single() : sb.from(table).insert(row).select().single();
-  const { data, error } = await q;
-  if (error) throw error;
-  return data.id;
+  return rpc("gt_save", { tbl: table, data: row, rid: id || null });
 }
 async function remove(table, id) {
   if (DEMO) { state[table] = state[table].filter(x => x.id !== id); return; }
-  const { error } = await sb.from(table).delete().eq("id", id);
-  if (error) throw error;
+  await rpc("gt_delete", { tbl: table, rid: id });
 }
 async function ensureCourse(c) {
   if (!c.name || !c.rating || !c.slope || !c.par) return null;
   const hit = state.courses.find(x => x.name.toLowerCase() === c.name.toLowerCase() && (x.tee_name || "").toLowerCase() === (c.tee_name || "").toLowerCase());
+  const extra = {};
+  if (c.pars?.length) extra.pars = c.pars;
+  if (c.lat != null) { extra.lat = c.lat; extra.lng = c.lng; }
   if (hit) {
-    if (hit.rating !== c.rating || hit.slope !== c.slope || hit.par !== c.par) await save("courses", { rating: c.rating, slope: c.slope, par: c.par }, hit.id);
+    const upd = { ...extra };
+    if (hit.rating !== c.rating || hit.slope !== c.slope || hit.par !== c.par) Object.assign(upd, { rating: c.rating, slope: c.slope, par: c.par });
+    if (hit.pars?.length && upd.pars) delete upd.pars;
+    if (hit.lat != null) { delete upd.lat; delete upd.lng; }
+    if (Object.keys(upd).length) { await save("courses", upd, hit.id); Object.assign(hit, upd); }
     return hit.id;
   }
-  return save("courses", { name: c.name, tee_name: c.tee_name || null, rating: c.rating, slope: c.slope, par: c.par, city: c.city || null, state: c.state || null, ogapi_id: c.ogapi_id || null });
+  return save("courses", { name: c.name, tee_name: c.tee_name || null, rating: c.rating, slope: c.slope, par: c.par, city: c.city || null, state: c.state || null, ogapi_id: c.ogapi_id || null, ...extra });
+}
+
+// ---------- security phrase ----------
+const editing = () => !!state.phrase;
+function lock(wrong) {
+  state.phrase = null;
+  localStorage.removeItem("golf_phrase");
+  render();
+  if (wrong) toast("Security phrase changed or wrong. Enter it again.");
+}
+function phraseForm(then) {
+  openModal(`<h2>Enter scores</h2><p class="hint">Type the family security phrase. This phone remembers it until you lock it.</p>
+    <form id="pf"><label>Security phrase<input name="p" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" required></label>
+    <div class="acts"><button class="primary" type="submit">Unlock</button></div></form>`, m => {
+    const f = $("#pf", m); setTimeout(() => f.p.focus(), 50);
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const p = f.p.value.trim();
+      const btn = f.querySelector("button"); btn.disabled = true;
+      try {
+        let ok = true;
+        if (!DEMO) { const r = await sb.rpc("gt_check", { p }); if (r.error) throw r.error; ok = r.data; }
+        if (!ok) { btn.disabled = false; f.p.select(); return toast("That's not it."); }
+        state.phrase = p; localStorage.setItem("golf_phrase", p);
+        closeModal(); render(); toast("Unlocked. Tap + to add.");
+        then && then();
+      } catch (err) { btn.disabled = false; toast(errMsg(err)); }
+    };
+  });
 }
 
 // ---------- chart (single y axis, crosshair tooltip) ----------
@@ -253,10 +298,11 @@ function render() {
   if (!tab) return;
   document.querySelectorAll(".tabs a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
   const main = $("#main");
-  main.innerHTML = tab === "h2h" ? viewH2H() : viewPlayer(tab);
+  main.innerHTML = tab === "card" ? viewCard(state.cardId) : liveStrip() + (tab === "h2h" ? viewH2H() : viewPlayer(tab));
   wireCharts(main);
-  $("#authbtn").textContent = state.user ? "Sign out" : "Sign in";
-  document.body.classList.toggle("editing", !!state.user);
+  $("#authbtn").textContent = editing() ? "Lock" : "Enter scores";
+  document.body.classList.toggle("editing", editing());
+  document.body.classList.toggle("oncard", tab === "card");
 }
 
 function statTile(label, value, sub = "") {
@@ -290,7 +336,7 @@ function viewPlayer(slug) {
     const m = r.match_id ? state.matches.find(x => x.id === r.match_id) : null;
     return `<tr>
       <td>${fmtShort(r.played_on)}<div class="yr">${r.played_on.slice(0, 4)}</div></td>
-      <td>${esc(r.course_name)}${r.tee_name ? `<span class="tee">${esc(r.tee_name)}</span>` : ""}${m ? `<span class="tag">match</span>` : ""}${r.holes === 9 ? `<span class="tag">9 holes</span>` : ""}${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ""}</td>
+      <td>${esc(r.course_name)}${r.tee_name ? `<span class="tee">${esc(r.tee_name)}</span>` : ""}${m ? `<span class="tag">match</span>` : ""}${r.holes === 9 ? `<span class="tag">9 holes</span>` : ""}${r.hole_scores ? `<span class="tag">hole by hole</span>` : ""}${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ""}</td>
       <td class="n"><b>${r.score}</b><div class="yr">${toPar(r.score, r.par)}</div></td>
       <td class="n">${countsForIndex(r) ? `<span class="${counts ? "counts" : ""}">${diffOf(r).toFixed(1)}</span>` : "–"}</td>
       <td class="ed"><button class="link" data-act="edit-round" data-id="${r.id}">Edit</button></td></tr>`;
@@ -362,7 +408,7 @@ function viewH2H() {
       <div class="mp">${m.players.map(s => `<span>${dot(s)}${esc(pname(s))}</span>`).join(" vs ")}</div>
       ${hasCourse && m.scoring === "net" ? strokesLine(m, m.players) : ""}
       ${m.notes ? `<div class="note">${esc(m.notes)}</div>` : ""}
-      <div class="ed acts"><button data-act="results" data-id="${m.id}">Post results</button><button class="link" data-act="edit-match" data-id="${m.id}">Edit</button></div>
+      <div class="ed acts"><button class="primary" data-act="start-card" data-id="${m.id}">Start scorecard</button><button data-act="results" data-id="${m.id}">Post results</button><button class="link" data-act="edit-match" data-id="${m.id}">Edit</button></div>
     </div>`;
   }).join("");
 
@@ -407,8 +453,71 @@ function closeModal() { const m = $("#modal"); m.hidden = true; m.innerHTML = ""
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => t.hidden = true, 3000); }
 const errMsg = e => (e && (e.message || e.error_description)) || String(e);
 
+// ---------- course finder ----------
+// Near me: saved courses + OpenGolfAPI (has tee ratings) + OpenStreetMap golf
+// courses (names and locations only). Tee rating/slope come from OpenGolfAPI
+// when it has them; otherwise they're typed once from the scorecard and saved.
+const OVERPASS = ["https://overpass-api.de/api/interpreter", "https://overpass.kumi.systems/api/interpreter", "https://overpass.private.coffee/api/interpreter"];
+const miles = (a, b, c, d) => { const R = 3958.8, t = Math.PI / 180, x = (c - a) * t, y = (d - b) * t;
+  const h = Math.sin(x / 2) ** 2 + Math.cos(a * t) * Math.cos(c * t) * Math.sin(y / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+const normName = s => String(s || "").toLowerCase().replace(/golf|country|club|course|links|the|&|and|[^a-z0-9]/g, "");
+function timed(url, opts = {}, ms = 9000) {
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), ms);
+  return fetch(url, { ...opts, signal: c.signal }).finally(() => clearTimeout(t));
+}
+function myLocation() {
+  return new Promise((ok, no) => {
+    if (!navigator.geolocation) return no(new Error("This browser can't share location."));
+    navigator.geolocation.getCurrentPosition(p => ok({ lat: p.coords.latitude, lng: p.coords.longitude }),
+      e => no(new Error(e.code === 1 ? "Location is blocked. Allow it for this site in your browser settings." : "Couldn't get your location.")),
+      { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
+  });
+}
+async function osmNear({ lat, lng }) {
+  const q = `[out:json][timeout:15];nwr["leisure"="golf_course"]["name"](around:40000,${lat},${lng});out center tags 40;`;
+  for (const host of OVERPASS) {
+    try {
+      const r = await timed(host + "?data=" + encodeURIComponent(q), {}, 12000);
+      if (!r.ok) continue;
+      const j = await r.json();
+      return j.elements.map(e => {
+        const la = e.center?.lat ?? e.lat, lo = e.center?.lon ?? e.lon;
+        return { src: "osm", name: e.tags.name, city: e.tags["addr:city"] || "", state: e.tags["addr:state"] || "", lat: la, lng: lo, mi: miles(lat, lng, la, lo) };
+      });
+    } catch (e) { /* try next mirror */ }
+  }
+  return [];
+}
+async function ogNear({ lat, lng }) {
+  try {
+    const r = await timed(`${OGAPI}/v1/courses/search?lat=${lat}&lng=${lng}&radius_mi=25&limit=25`, {}, 9000);
+    const j = await r.json();
+    return (j.courses || []).filter(c => c.latitude != null).map(c => ({ src: "og", id: c.id, name: c.course_name || c.name, city: c.city || "", state: c.state || "",
+      lat: c.latitude, lng: c.longitude, mi: c.distance_mi ?? miles(lat, lng, c.latitude, c.longitude) }));
+  } catch (e) { return []; }
+}
+async function ogByName(term) {
+  const r = await timed(`${OGAPI}/v1/courses/search?q=${encodeURIComponent(term)}&limit=10`, {}, 9000);
+  const j = await r.json();
+  return (j.courses || []).map(c => ({ src: "og", id: c.id, name: c.course_name || c.name, city: c.city || "", state: c.state || "", lat: c.latitude, lng: c.longitude }));
+}
+// Course detail: tee ratings and, when listed, the par for each hole.
+async function ogDetail(id) {
+  let c = null;
+  for (const u of [`${OGAPI}/api/v1/courses/${encodeURIComponent(id)}`, `${OGAPI}/v1/courses/${encodeURIComponent(id)}`]) {
+    try { const r = await timed(u, {}, 9000); if (r.ok) { c = await r.json(); if (c && (c.tees || c.holes)) break; } } catch (e) { /* next */ }
+  }
+  if (!c) throw new Error("no detail");
+  const holes = (c.holes || []).map(h => ({ n: Number(h.hole_number ?? h.number ?? h.hole), par: Number(h.par) })).filter(h => h.n && h.par >= 3 && h.par <= 6).sort((a, b) => a.n - b.n);
+  const pars = (holes.length === 18 || holes.length === 9) ? holes.map(h => h.par) : null;
+  const tees = (c.tees || []).map(t => ({ name: t.tee_name || t.name || t.color || "Tee", gender: t.gender, rating: Number(t.course_rating ?? t.rating), slope: Number(t.slope ?? t.slope_rating), par: Number(t.par) || null, yards: t.yardage || t.total_yardage || null }))
+    .filter(t => t.rating > 50 && t.slope >= 55 && t.slope <= 155);
+  return { par: c.par_total || c.par || (pars ? pars.reduce((a, b) => a + b, 0) : null), pars, tees };
+}
+
 function courseFields(v = {}) {
-  return `<label>Course<input name="course_name" id="cq" autocomplete="off" value="${esc(v.course_name || "")}" placeholder="Search saved or online courses"></label>
+  return `<label>Course<input name="course_name" id="cq" autocomplete="off" value="${esc(v.course_name || "")}" placeholder="Type a name, or use Near me"></label>
+  <button type="button" class="near" id="near">📍 Courses near me</button>
   <div id="cres" class="cres"></div>
   <div class="row4">
     <label>Tee<input name="tee_name" value="${esc(v.tee_name || "")}"></label>
@@ -417,7 +526,8 @@ function courseFields(v = {}) {
     <label>Par<input name="par" inputmode="numeric" value="${v.par ?? ""}"></label>
   </div>
   <input type="hidden" name="ogapi_id" value="${esc(v.ogapi_id || "")}"><input type="hidden" name="city"><input type="hidden" name="state">
-  <p class="hint">Pick a course to fill rating, slope, and par. They're on the scorecard if the lookup doesn't have your tees.</p>`;
+  <input type="hidden" name="lat" value="${v.lat ?? ""}"><input type="hidden" name="lng" value="${v.lng ?? ""}"><input type="hidden" name="pars" value="${esc(v.pars ? JSON.stringify(v.pars) : "")}">
+  <p class="hint">Rating and slope are printed on the scorecard next to each tee. You only type them once per course.</p>`;
 }
 
 function wireCoursePicker(form) {
@@ -427,51 +537,86 @@ function wireCoursePicker(form) {
     form.course_name.value = c.name; form.tee_name.value = c.tee_name || "";
     form.rating.value = c.rating ?? ""; form.slope.value = c.slope ?? ""; form.par.value = c.par ?? "";
     form.ogapi_id.value = c.ogapi_id || ""; form.city.value = c.city || ""; form.state.value = c.state || "";
+    form.lat.value = c.lat ?? ""; form.lng.value = c.lng ?? ""; form.pars.value = c.pars?.length ? JSON.stringify(c.pars) : "";
     box.innerHTML = "";
+    form.dispatchEvent(new CustomEvent("coursepicked", { detail: c }));
+    if (!c.rating || !c.slope) { toast("Add the tee, rating, and slope from the scorecard."); setTimeout(() => (c.tee_name ? form.rating : form.tee_name).focus(), 50); }
   };
+  const savedBtn = (c, mi) => `<button type="button" class="opt" data-saved="${c.id}"><b>${esc(c.name)}</b> ${c.tee_name ? esc(c.tee_name) + " · " : ""}${c.rating}/${c.slope} · par ${c.par}${mi != null ? ` · ${mi.toFixed(1)} mi` : ""}<span class="tag">saved</span></button>`;
+  const onlineBtn = c => `<button type="button" class="opt" data-pick="${encodeURIComponent(JSON.stringify(c))}"><b>${esc(c.name)}</b> <span class="muted">${esc([c.city, c.state].filter(Boolean).join(", "))}${c.mi != null ? ` · ${c.mi.toFixed(1)} mi` : ""}</span></button>`;
+
   q.addEventListener("input", () => {
     clearTimeout(timer);
     const term = q.value.trim().toLowerCase();
+    form.ogapi_id.value = ""; form.lat.value = ""; form.lng.value = ""; form.pars.value = "";
     if (term.length < 3) { box.innerHTML = ""; return; }
     const saved = state.courses.filter(c => c.name.toLowerCase().includes(term)).slice(0, 6);
-    const savedHtml = saved.map(c => `<button type="button" class="opt" data-saved="${c.id}"><b>${esc(c.name)}</b> ${c.tee_name ? esc(c.tee_name) + " · " : ""}${c.rating}/${c.slope} · par ${c.par}<span class="tag">saved</span></button>`).join("");
+    const savedHtml = saved.map(c => savedBtn(c)).join("");
     box.innerHTML = savedHtml + `<div class="muted small">Searching online…</div>`;
     timer = setTimeout(async () => {
       const my = ++seq;
       try {
-        const res = await fetch(`${OGAPI}/v1/courses/search?q=${encodeURIComponent(term)}`);
-        const js = await res.json();
+        const online = (await ogByName(term)).slice(0, 8);
         if (my !== seq) return;
-        const online = (js.courses || []).slice(0, 8).map(c => `<button type="button" class="opt" data-og="${esc(c.id)}" data-name="${esc(c.name)}" data-city="${esc(c.city || "")}" data-state="${esc(c.state || "")}"><b>${esc(c.name)}</b> ${esc([c.city, c.state].filter(Boolean).join(", "))}</button>`).join("");
-        box.innerHTML = savedHtml + (online || `<div class="muted small">No online matches. Type the course and enter rating, slope, and par yourself.</div>`);
-      } catch (e) { if (my === seq) box.innerHTML = savedHtml + `<div class="muted small">Online lookup unavailable right now. Enter rating, slope, and par yourself.</div>`; }
-    }, 350);
+        box.innerHTML = savedHtml + (online.map(onlineBtn).join("") || `<div class="muted small">No online matches. Keep the name and fill in the tee details.</div>`);
+      } catch (e) { if (my === seq) box.innerHTML = savedHtml + `<div class="muted small">Online search isn't answering. Try Near me, or type the details.</div>`; }
+    }, 400);
   });
+
+  $("#near", form).onclick = async () => {
+    const my = ++seq;
+    box.innerHTML = `<div class="muted small">Finding you…</div>`;
+    let loc;
+    try { loc = await myLocation(); } catch (e) { box.innerHTML = `<div class="muted small">${esc(e.message)}</div>`; return; }
+    const savedNear = state.courses.filter(c => c.lat != null).map(c => ({ c, mi: miles(loc.lat, loc.lng, c.lat, c.lng) })).filter(x => x.mi < 30).sort((a, b) => a.mi - b.mi);
+    const savedHtml = savedNear.slice(0, 6).map(x => savedBtn(x.c, x.mi)).join("");
+    box.innerHTML = savedHtml + `<div class="muted small">Looking for courses nearby…</div>`;
+    const [og, osm] = await Promise.all([ogNear(loc), osmNear(loc)]);
+    if (my !== seq) return;
+    const seen = new Set(savedNear.map(x => normName(x.c.name)));
+    const list = [];
+    for (const c of [...og, ...osm].sort((a, b) => a.mi - b.mi)) {
+      const k = normName(c.name); if (!k || seen.has(k)) continue;
+      seen.add(k); list.push(c);
+    }
+    box.innerHTML = savedHtml + (list.slice(0, 12).map(onlineBtn).join("") || (savedHtml ? "" : `<div class="muted small">Couldn't find courses nearby right now. Type the course name instead.</div>`));
+  };
+
   box.addEventListener("click", async e => {
     const b = e.target.closest("button"); if (!b) return;
-    if (b.dataset.saved) return fill(state.courses.find(c => c.id === b.dataset.saved));
+    if (b.dataset.saved) { const c = state.courses.find(c => c.id === b.dataset.saved); return fill({ ...c, pars: c.pars }); }
     if (b.dataset.tee) return fill(JSON.parse(decodeURIComponent(b.dataset.tee)));
-    if (b.dataset.og) {
-      box.innerHTML = `<div class="muted small">Loading tees…</div>`;
+    if (!b.dataset.pick) return;
+    let c = JSON.parse(decodeURIComponent(b.dataset.pick));
+    box.innerHTML = `<div class="muted small">Loading tees…</div>`;
+    const base = { name: c.name, city: c.city, state: c.state, lat: c.lat, lng: c.lng };
+    let id = c.id;
+    if (!id) { // OpenStreetMap only: look for the same course in OpenGolfAPI
       try {
-        const res = await fetch(`${OGAPI}/api/v1/courses/${encodeURIComponent(b.dataset.og)}`);
-        const c = await res.json();
-        const name = b.dataset.name, city = b.dataset.city, st = b.dataset.state;
-        const tees = (c.tees || []).filter(t => t.course_rating && t.slope);
-        if (!tees.length) { fill({ name, par: c.par, ogapi_id: b.dataset.og, city, state: st }); toast("No tee ratings online for this course. Add them from the scorecard."); return; }
-        box.innerHTML = `<div class="muted small">Pick your tees:</div>` + tees.map(t => {
-          const v = { name, tee_name: t.tee_name + (t.gender && t.gender !== "Male" ? ` (${t.gender[0]})` : ""), rating: t.course_rating, slope: t.slope, par: t.par || c.par, ogapi_id: b.dataset.og, city, state: st };
-          return `<button type="button" class="opt" data-tee="${encodeURIComponent(JSON.stringify(v))}"><b>${esc(v.tee_name)}</b> ${t.yardage ? t.yardage + " yds · " : ""}${t.course_rating}/${t.slope} · par ${v.par}</button>`;
-        }).join("");
-      } catch (err) { box.innerHTML = `<div class="muted small">Couldn't load tees. Enter them yourself.</div>`; }
+        const hits = await ogByName(c.name);
+        const best = hits.find(h => normName(h.name) === normName(c.name) && (h.lat == null || miles(c.lat, c.lng, h.lat, h.lng) < 5));
+        if (best) id = best.id;
+      } catch (err) { /* fall through to manual */ }
     }
+    if (!id) return fill(base);
+    try {
+      const d = await ogDetail(id);
+      const one = { ...base, ogapi_id: id, par: d.par, pars: d.pars };
+      if (!d.tees.length) return fill(one);
+      box.innerHTML = `<div class="muted small">Pick your tees:</div>` + d.tees.map(t => {
+        const v = { ...one, tee_name: t.name + (t.gender && !/^m/i.test(t.gender) ? ` (${t.gender[0]})` : ""), rating: t.rating, slope: t.slope, par: t.par || d.par };
+        return `<button type="button" class="opt" data-tee="${encodeURIComponent(JSON.stringify(v))}"><b>${esc(v.tee_name)}</b> ${t.yards ? t.yards + " yds · " : ""}${t.rating}/${t.slope}${v.par ? " · par " + v.par : ""}</button>`;
+      }).join("") + `<button type="button" class="opt" data-tee="${encodeURIComponent(JSON.stringify(one))}"><b>Other tees</b> <span class="muted">type them in</span></button>`;
+    } catch (err) { fill(base); }
   });
 }
 
 function readCourse(f) {
+  let pars = null; try { pars = f.pars.value ? JSON.parse(f.pars.value) : null; } catch (e) { /* ignore */ }
   return { course_name: f.course_name.value.trim(), tee_name: f.tee_name.value.trim() || null,
     rating: f.rating.value ? Number(f.rating.value) : null, slope: f.slope.value ? Number(f.slope.value) : null,
-    par: f.par.value ? Number(f.par.value) : null, ogapi_id: f.ogapi_id.value || null, city: f.city.value || null, state: f.state.value || null };
+    par: f.par.value ? Number(f.par.value) : null, ogapi_id: f.ogapi_id.value || null, city: f.city.value || null, state: f.state.value || null,
+    lat: f.lat.value ? Number(f.lat.value) : null, lng: f.lng.value ? Number(f.lng.value) : null, pars };
 }
 
 function roundForm(r) {
@@ -591,7 +736,7 @@ function startForm(slug) {
       const v = raw === "" ? null : Number(raw);
       if (raw !== "" && (isNaN(v) || v < -10 || v > 54)) return toast("Enter a handicap between -10 and 54.");
       try {
-        if (!DEMO) { const { error } = await sb.from("players").upsert({ slug, starting_index: v, updated_at: new Date().toISOString() }); if (error) throw error; }
+        if (!DEMO) await rpc("gt_set_start", { slug, v });
         if (v == null) delete state.start[slug]; else state.start[slug] = v;
         closeModal(); await refresh(); toast("Saved.");
       } catch (err) { toast("Couldn't save: " + errMsg(err)); }
@@ -599,24 +744,236 @@ function startForm(slug) {
   });
 }
 
-function signInForm() {
-  openModal(`<h2>Sign in</h2><p class="hint">Only Trent, Dad, and Logan have logins.</p>
-    <form id="sf"><label>Email<input type="email" name="email" autocomplete="username" required></label>
-    <label>Password<input type="password" name="password" autocomplete="current-password" required></label>
-    <div class="acts"><button class="primary" type="submit">Sign in</button></div></form>`, m => {
-    $("#sf", m).onsubmit = async e => {
+// ---------- live scorecard ----------
+// A card is saved hole by hole while you play. Each phone only writes the
+// players it changed, so two people can keep score on the same card.
+const cardById = id => state.cards.find(c => c.id === id);
+const holeVals = (card, s) => { const a = card.scores?.[s] || []; return card.pars.map((_, i) => a[i] ?? null); };
+function cardTotals(card, s) {
+  const v = holeVals(card, s); let gross = 0, par = 0, thru = 0;
+  v.forEach((x, i) => { if (x != null) { gross += x; par += card.pars[i]; thru++; } });
+  return { gross, toPar: gross - par, thru, done: thru === card.pars.length };
+}
+const fmtToPar = d => d === 0 ? "E" : d > 0 ? "+" + d : String(d);
+function liveStrip() {
+  if (!state.cards.length) return "";
+  return state.cards.map(c => {
+    const lead = c.players.map(s => ({ s, t: cardTotals(c, s) })).filter(x => x.t.thru).sort((a, b) => a.t.toPar - b.t.toPar)[0];
+    const thru = Math.max(0, ...c.players.map(s => cardTotals(c, s).thru));
+    return `<a class="live" href="#card/${c.id}"><span class="pulse"></span><span class="lt"><b>Live</b> · ${esc(c.course_name)}<span class="ls">${thru ? `thru ${thru}` : "not started"}${lead ? ` · ${esc(pname(lead.s))} ${fmtToPar(lead.t.toPar)}` : ""}</span></span><span class="go">Open ›</span></a>`;
+  }).join("");
+}
+
+const pending = {}; // cardId -> Set of player slugs (or "__pars") waiting to save
+let saveTimer = null, pollTimer = null;
+function setSaveState(txt, cls = "") { const el = $("#savestate"); if (el) { el.textContent = txt; el.className = "savestate " + cls; } }
+function queueSave(card, slug) {
+  (pending[card.id] ||= new Set()).add(slug);
+  try { localStorage.setItem("golf_card_" + card.id, JSON.stringify({ scores: card.scores, pars: card.pars })); } catch (e) { /* full */ }
+  setSaveState("Saving…");
+  clearTimeout(saveTimer); saveTimer = setTimeout(flushSaves, 500);
+}
+async function flushSaves() {
+  for (const id of Object.keys(pending)) {
+    const card = cardById(id); const set = pending[id];
+    if (!card || !set.size) continue;
+    try {
+      for (const s of [...set]) {
+        if (DEMO) { set.delete(s); continue; }
+        const parsOnly = s === "__pars";
+        const { error } = await sb.rpc("gt_card_score", { p: state.phrase || "", cid: id, slug: parsOnly ? null : s, vals: parsOnly ? null : holeVals(card, s), pars: card.pars });
+        if (error) throw error;
+        set.delete(s);
+      }
+      if (!set.size) { delete pending[id]; localStorage.removeItem("golf_card_" + id); }
+      setSaveState("Saved ✓", "ok");
+    } catch (e) {
+      if (/security phrase/i.test(e.message || "")) { lock(true); return; }
+      setSaveState("No signal. Scores are kept on this phone and will save.", "warn");
+      clearTimeout(saveTimer); saveTimer = setTimeout(flushSaves, 8000);
+      return;
+    }
+  }
+}
+// Pull the latest card from the server but keep anything this phone hasn't saved yet.
+async function pullCard(id) {
+  if (DEMO) return;
+  const { data } = await sb.from("cards").select("*").eq("id", id).maybeSingle();
+  if (!data) return;
+  const mine = pending[id] || new Set();
+  const local = cardById(id);
+  if (local) {
+    for (const s of mine) if (s !== "__pars") data.scores[s] = local.scores[s];
+    if (mine.has("__pars")) data.pars = local.pars;
+    Object.assign(local, data);
+  } else if (data.status === "live") state.cards.push(data);
+}
+
+function viewCard(id) {
+  const card = cardById(id);
+  if (!card) return `<section class="card"><a href="#h2h" class="back">‹ Back</a><div class="empty">This scorecard is finished or was deleted.</div></section>`;
+  const n = card.pars.length;
+  const hole = Math.min(n - 1, Math.max(0, Number(localStorage.getItem("golf_hole_" + id) ?? firstOpenHole(card))));
+  const ed = editing();
+  const board = card.players.map(s => ({ s, t: cardTotals(card, s) })).sort((a, b) => (b.t.thru ? 1 : 0) - (a.t.thru ? 1 : 0) || a.t.toPar - b.t.toPar);
+
+  const entry = ed ? `<section class="card hole">
+      <div class="hhead">
+        <button class="nav" data-act="hole" data-v="${hole - 1}" ${hole === 0 ? "disabled" : ""} aria-label="Previous hole">‹</button>
+        <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="par" data-v="${hole}">Par ${card.pars[hole]} <span class="muted">change</span></button></div>
+        <button class="nav" data-act="hole" data-v="${hole + 1}" ${hole === n - 1 ? "disabled" : ""} aria-label="Next hole">›</button>
+      </div>
+      ${card.players.map(s => {
+        const v = holeVals(card, s)[hole]; const t = cardTotals(card, s);
+        return `<div class="prow">
+          <div class="pn">${dot(s)}${esc(pname(s))}<div class="ps">${t.thru ? `${t.gross} · ${fmtToPar(t.toPar)} thru ${t.thru}` : "no score yet"}</div></div>
+          <button class="step" data-act="sc" data-s="${s}" data-d="-1" aria-label="${esc(pname(s))} one less">−</button>
+          <button class="val ${v == null ? "empty" : scoreCls(v, card.pars[hole])}" data-act="sc" data-s="${s}" data-d="0" aria-label="${esc(pname(s))} score">${v ?? card.pars[hole]}</button>
+          <button class="step" data-act="sc" data-s="${s}" data-d="1" aria-label="${esc(pname(s))} one more">+</button>
+        </div>`;
+      }).join("")}
+      <div class="hfoot"><span id="savestate" class="savestate"></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Finish round</button>`}</div>
+      <p class="hint">Tap the number to give par. Use − and + for anything else.</p>
+    </section>` : `<p class="hint">Scores update by themselves. Tap Enter scores up top to keep score.</p>`;
+
+  const grid = half => {
+    const idx = half === 0 ? [...Array(Math.min(9, n)).keys()] : [...Array(n - 9).keys()].map(i => i + 9);
+    if (!idx.length) return "";
+    const sum = arr => arr.reduce((a, b) => a + b, 0);
+    return `<table class="sc"><thead><tr><th>${half === 0 ? "Out" : "In"}</th>${idx.map(i => `<th class="${ed && i === hole ? "cur" : ""}" ${ed ? `data-act="hole" data-v="${i}"` : ""}>${i + 1}</th>`).join("")}<th>Tot</th></tr>
+      <tr class="par"><td>Par</td>${idx.map(i => `<td>${card.pars[i]}</td>`).join("")}<td>${sum(idx.map(i => card.pars[i]))}</td></tr></thead>
+      <tbody>${card.players.map(s => { const v = holeVals(card, s); const got = idx.filter(i => v[i] != null);
+        return `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}</td>${idx.map(i => `<td><span class="${v[i] == null ? "" : scoreCls(v[i], card.pars[i])}">${v[i] ?? ""}</span></td>`).join("")}<td><b>${got.length ? sum(got.map(i => v[i])) : ""}</b></td></tr>`; }).join("")}</tbody></table>`;
+  };
+
+  return `<a href="#h2h" class="back">‹ Back</a>
+  <section class="card cardtop">
+    <div class="ct"><span class="pulse"></span>Live scorecard</div>
+    <div class="cc">${esc(card.course_name)}${card.tee_name ? `<span class="tee">${esc(card.tee_name)}</span>` : ""}</div>
+    <div class="muted small">${fmtDate(card.played_on)} · ${n} holes${card.match_id ? " · match" : ""}</div>
+    <div class="board">${board.map((x, i) => `<div class="br"><span>${x.t.thru && i === 0 ? "🥇 " : ""}${dot(x.s)}${esc(pname(x.s))}</span><span class="n">${x.t.thru ? `<b>${fmtToPar(x.t.toPar)}</b> <span class="muted">${x.t.gross} · thru ${x.t.thru}</span>` : `<span class="muted">–</span>`}</span></div>`).join("")}</div>
+  </section>
+  ${entry}
+  <section class="card"><h3>Scorecard</h3>${grid(0)}${grid(1)}
+    <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span></div></section>
+  <div class="ed acts"><button class="link" data-act="card-del" data-id="${id}">Delete this scorecard</button></div>`;
+}
+const scoreCls = (v, par) => v < par - 1 ? "sc-e" : v === par - 1 ? "sc-b" : v === par ? "sc-p" : v === par + 1 ? "sc-o" : "sc-d";
+function firstOpenHole(card) {
+  const n = card.pars.length;
+  for (let i = 0; i < n; i++) if (card.players.some(s => holeVals(card, s)[i] == null)) return i;
+  return n - 1;
+}
+
+function cardAction(act, b) {
+  const id = state.cardId; const card = cardById(id); if (!card) return;
+  if (act === "hole") { localStorage.setItem("golf_hole_" + id, b.dataset.v); render(); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+  if (!editing()) return phraseForm();
+  if (act === "sc") {
+    const s = b.dataset.s, d = Number(b.dataset.d);
+    const hole = Number(localStorage.getItem("golf_hole_" + id) ?? firstOpenHole(card));
+    const arr = holeVals(card, s); const par = card.pars[hole];
+    let v = arr[hole];
+    if (d === 0) v = v == null ? par : v; else v = Math.min(15, Math.max(1, (v ?? par) + d));
+    arr[hole] = v; card.scores = { ...card.scores, [s]: arr };
+    render(); queueSave(card, s);
+  }
+  if (act === "par") {
+    const h = Number(b.dataset.v); const p = card.pars[h];
+    card.pars = card.pars.map((x, i) => i === h ? (p >= 5 ? 3 : p + 1) : x);
+    render(); queueSave(card, "__pars");
+  }
+}
+
+function cardForm(fromMatch) {
+  if (!editing()) return phraseForm(() => cardForm(fromMatch));
+  const todays = state.matches.filter(m => m.status === "scheduled" && Math.abs(daysBetween(today(), m.scheduled_for)) <= 1);
+  const m0 = fromMatch || (todays.length === 1 ? todays[0] : null);
+  const v = m0 ? { ...m0, ...(state.courses.find(c => c.id === m0.course_id) || {}), course_name: m0.course_name } : {};
+  openModal(`<h2>Start a scorecard</h2>
+    <form id="cf">
+      ${todays.length || fromMatch ? `<label>Match<select name="match"><option value="">Not a match</option>${[...new Set([...(fromMatch ? [fromMatch] : []), ...todays])].map(m => `<option value="${m.id}" ${m0 && m.id === m0.id ? "selected" : ""}>${fmtShort(m.scheduled_for)} · ${esc(m.course_name || "match")} · ${m.players.map(pname).join(", ")}</option>`).join("")}</select></label>` : ""}
+      <fieldset><legend>Who's playing</legend>${PLAYERS.map(p => `<label class="chk"><input type="checkbox" name="pl" value="${p.slug}" ${(m0 ? m0.players : PLAYERS.map(x => x.slug)).includes(p.slug) ? "checked" : ""}> ${dot(p.slug)}${esc(p.name)}</label>`).join("")}</fieldset>
+      <div class="row2"><label>Date<input type="date" name="played_on" value="${today()}" required></label>
+      <label>Holes<select name="holes"><option>18</option><option>9</option></select></label></div>
+      ${courseFields(v)}
+      <div class="acts"><button class="primary" type="submit">Start</button></div>
+    </form>`, m => {
+    const f = $("#cf", m); wireCoursePicker(f);
+    if (f.match) f.match.onchange = () => {
+      const mt = state.matches.find(x => x.id === f.match.value); if (!mt) return;
+      f.querySelectorAll("[name=pl]").forEach(x => x.checked = mt.players.includes(x.value));
+      if (mt.course_name) { const c = state.courses.find(c => c.id === mt.course_id) || mt;
+        f.course_name.value = mt.course_name; f.tee_name.value = mt.tee_name || ""; f.rating.value = mt.rating ?? ""; f.slope.value = mt.slope ?? ""; f.par.value = mt.par ?? "";
+        f.pars.value = c.pars ? JSON.stringify(c.pars) : ""; }
+    };
+    f.onsubmit = async e => {
       e.preventDefault();
-      const f = e.target;
-      if (DEMO) { state.user = { email: "demo" }; closeModal(); render(); toast("Demo mode: edits aren't saved."); return; }
-      const { data, error } = await sb.auth.signInWithPassword({ email: f.email.value.trim(), password: f.password.value });
-      if (error) return toast(error.message);
-      state.user = data.user; closeModal(); render(); toast("Signed in.");
+      const c = readCourse(f); const n = Number(f.holes.value);
+      const players = [...f.querySelectorAll("[name=pl]:checked")].map(x => x.value);
+      if (!players.length) return toast("Pick who's playing.");
+      if (!c.course_name) return toast("Pick or type the course.");
+      let pars = c.pars?.length === 18 ? (n === 9 ? c.pars.slice(0, 9) : c.pars) : c.pars?.length === 9 && n === 9 ? c.pars : Array(n).fill(4);
+      const btn = f.querySelector("[type=submit]"); btn.disabled = true;
+      try {
+        const course_id = c.rating && c.slope && c.par ? await ensureCourse({ ...c, name: c.course_name }) : null;
+        const row = { played_on: f.played_on.value, course_id, course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope,
+          par: c.par, pars, players, scores: {}, match_id: f.match?.value || null, status: "live" };
+        const id = await save("cards", row);
+        localStorage.setItem("golf_hole_" + id, "0");
+        closeModal(); await loadData(); location.hash = "card/" + id;
+        if (!c.pars?.length) toast("Hole pars start at 4. Tap Par to change a hole.");
+      } catch (err) { btn.disabled = false; toast("Couldn't start: " + errMsg(err)); }
     };
   });
 }
 
+function finishForm(id) {
+  const card = cardById(id); if (!card) return;
+  const n = card.pars.length; const parSum = card.pars.reduce((a, b) => a + b, 0);
+  const rows = card.players.map(s => ({ s, t: cardTotals(card, s) }));
+  openModal(`<h2>Finish round</h2><p class="hint">${esc(card.course_name)} · ${fmtDate(card.played_on)}</p>
+    <form id="ff">
+      ${courseFields({ ...card, par: n === 18 ? parSum : card.par || parSum })}
+      <div class="board">${rows.map(x => `<div class="br"><span>${dot(x.s)}${esc(pname(x.s))}</span><span class="n">${x.t.done ? `<b>${x.t.gross}</b> ${fmtToPar(x.t.toPar)}` : `<span class="warnt">${x.t.thru}/${n} holes, won't be posted</span>`}</span></div>`).join("")}</div>
+      <p class="hint">Each finished score goes on that player's round log${card.match_id ? " and the match gets its result" : ""}.${n === 9 ? " 9-hole rounds don't count toward handicaps." : ""}</p>
+      <div class="acts"><button class="primary" type="submit">Post scores</button><button type="button" data-close>Keep playing</button></div>
+    </form>`, m => {
+    const f = $("#ff", m); wireCoursePicker(f);
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const c = readCourse(f);
+      if (!c.rating || !c.slope || !c.par) return toast("Rating, slope, and par are needed for handicaps.");
+      const done = rows.filter(x => x.t.done);
+      if (!done.length) return toast("Nobody has all holes scored yet.");
+      const btn = f.querySelector("[type=submit]"); btn.disabled = true;
+      try {
+        await flushSaves();
+        const course_id = await ensureCourse({ ...c, name: c.course_name, pars: n === 18 ? card.pars : null });
+        for (const x of done) {
+          await save("rounds", { player: x.s, played_on: card.played_on, holes: n, score: x.t.gross, hole_scores: holeVals(card, x.s),
+            course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: c.par, course_id, match_id: card.match_id || null });
+        }
+        if (card.match_id && done.length >= 2) await save("matches", { status: "final", course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: c.par, course_id }, card.match_id);
+        await save("cards", { status: "done" }, id);
+        closeModal(); await loadData(); location.hash = "h2h"; toast("Round posted.");
+      } catch (err) { btn.disabled = false; toast("Couldn't post: " + errMsg(err)); }
+    };
+  });
+}
+
+function startPolling() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(async () => {
+    if (document.hidden || !$("#modal").hidden) return;
+    if (state.tab === "card") { await pullCard(state.cardId).catch(() => {}); render(); }
+    else if (!DEMO) { await loadData().catch(() => {}); render(); }
+  }, state.tab === "card" ? 15000 : 60000);
+}
+
 function addMenu() {
-  openModal(`<h2>Add</h2><div class="acts col"><button class="primary" data-go="round">Post a round</button><button data-go="match">Schedule a match</button></div>`, m => {
+  openModal(`<h2>Add</h2><div class="acts col"><button class="primary" data-go="card">Start a live scorecard</button><button data-go="round">Post a final score</button><button data-go="match">Schedule a match</button></div>`, m => {
+    m.querySelector("[data-go=card]").onclick = () => cardForm();
     m.querySelector("[data-go=round]").onclick = () => roundForm();
     m.querySelector("[data-go=match]").onclick = () => matchForm();
   });
@@ -630,8 +987,10 @@ async function refresh() {
 
 function route() {
   const h = location.hash.slice(1);
-  state.tab = P[h] || h === "h2h" ? h : "h2h";
+  if (h.startsWith("card/")) { state.tab = "card"; state.cardId = h.slice(5); }
+  else state.tab = P[h] || h === "h2h" ? h : "h2h";
   render();
+  startPolling();
   window.scrollTo(0, 0);
 }
 
@@ -643,6 +1002,10 @@ document.addEventListener("click", e => {
   if (act === "results") resultsForm(state.matches.find(m => m.id === id));
   if (act === "new-match") matchForm();
   if (act === "edit-start") startForm(id);
+  if (act === "start-card") cardForm(state.matches.find(m => m.id === id));
+  if (act === "finish") finishForm(id);
+  if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
+  if (["hole", "sc", "par"].includes(act)) cardAction(act, b);
 });
 document.addEventListener("change", e => {
   if (e.target.id === "calcCourse") {
@@ -659,19 +1022,21 @@ document.addEventListener("change", e => {
   if (DEMO) $("#demo").hidden = false;
   else {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
-    sb = createClient(CFG.supabaseUrl, CFG.supabaseAnonKey);
-    const { data } = await sb.auth.getSession();
-    state.user = data.session?.user || null;
-    sb.auth.onAuthStateChange((_e, s) => { state.user = s?.user || null; render(); });
+    sb = createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
   }
-  $("#authbtn").onclick = async () => {
-    if (state.user) { if (!DEMO) await sb.auth.signOut(); state.user = null; render(); toast("Signed out."); }
-    else signInForm();
+  $("#authbtn").onclick = () => {
+    if (editing()) { lock(); toast("Locked on this phone."); }
+    else phraseForm();
   };
   $("#fab").onclick = addMenu;
   window.addEventListener("hashchange", route);
   let rz = null, lastW = innerWidth;
   window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (Math.abs(innerWidth - lastW) > 40) { lastW = innerWidth; render(); } }, 250); });
   await loadData().catch(e => toast("Couldn't load data: " + errMsg(e)));
+  // Scores typed with no signal are kept on the phone; send them now.
+  for (const c of state.cards) {
+    try { const saved = JSON.parse(localStorage.getItem("golf_card_" + c.id) || "null");
+      if (saved && editing()) { c.scores = { ...c.scores, ...saved.scores }; c.pars = saved.pars || c.pars; Object.keys(saved.scores || {}).forEach(s => queueSave(c, s)); queueSave(c, "__pars"); } } catch (e) { /* ignore */ }
+  }
   route();
 })();

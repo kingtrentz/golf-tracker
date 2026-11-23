@@ -473,31 +473,35 @@ function myLocation() {
       { enableHighAccuracy: false, timeout: 12000, maximumAge: 300000 });
   });
 }
-async function osmNear({ lat, lng }) {
-  const q = `[out:json][timeout:15];nwr["leisure"="golf_course"]["name"](around:40000,${lat},${lng});out center tags 40;`;
-  for (const host of OVERPASS) {
+const box25 = ({ lat, lng }) => { const dy = 0.36, dx = 0.36 / Math.cos(lat * Math.PI / 180); return { s: lat - dy, n: lat + dy, w: lng - dx, e: lng + dx }; };
+// Fast: OpenStreetMap name search inside a ~25 mile box.
+async function nominatimNear(loc) {
+  const b = box25(loc);
+  try {
+    const r = await timed(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=40&bounded=1&viewbox=${b.w},${b.n},${b.e},${b.s}&q=golf`, {}, 8000);
+    const j = await r.json();
+    return j.filter(e => e.type === "golf_course" && e.name).map(e => ({ src: "osm", name: e.name, city: "", state: "", lat: Number(e.lat), lng: Number(e.lon), mi: miles(loc.lat, loc.lng, Number(e.lat), Number(e.lon)) }));
+  } catch (e) { return []; }
+}
+// Slower but catches courses without "golf" in the name (country clubs).
+async function osmNear(loc) {
+  const b = box25(loc), bb = `${b.s},${b.w},${b.n},${b.e}`;
+  const q = `[out:json][timeout:12];(way["leisure"="golf_course"]["name"](${bb});relation["leisure"="golf_course"]["name"](${bb}););out center tags;`;
+  for (const host of OVERPASS.slice(0, 2)) {
     try {
-      const r = await timed(host + "?data=" + encodeURIComponent(q), {}, 12000);
+      const r = await timed(host, { method: "POST", body: new URLSearchParams({ data: q }) }, 14000);
       if (!r.ok) continue;
       const j = await r.json();
       return j.elements.map(e => {
         const la = e.center?.lat ?? e.lat, lo = e.center?.lon ?? e.lon;
-        return { src: "osm", name: e.tags.name, city: e.tags["addr:city"] || "", state: e.tags["addr:state"] || "", lat: la, lng: lo, mi: miles(lat, lng, la, lo) };
+        return { src: "osm", name: e.tags.name, city: e.tags["addr:city"] || "", state: e.tags["addr:state"] || "", lat: la, lng: lo, mi: miles(loc.lat, loc.lng, la, lo) };
       });
     } catch (e) { /* try next mirror */ }
   }
   return [];
 }
-async function ogNear({ lat, lng }) {
-  try {
-    const r = await timed(`${OGAPI}/v1/courses/search?lat=${lat}&lng=${lng}&radius_mi=25&limit=25`, {}, 9000);
-    const j = await r.json();
-    return (j.courses || []).filter(c => c.latitude != null).map(c => ({ src: "og", id: c.id, name: c.course_name || c.name, city: c.city || "", state: c.state || "",
-      lat: c.latitude, lng: c.longitude, mi: c.distance_mi ?? miles(lat, lng, c.latitude, c.longitude) }));
-  } catch (e) { return []; }
-}
 async function ogByName(term) {
-  const r = await timed(`${OGAPI}/v1/courses/search?q=${encodeURIComponent(term)}&limit=10`, {}, 9000);
+  const r = await timed(`${OGAPI}/v1/courses/search?q=${encodeURIComponent(term)}&limit=10`, {}, 7000);
   const j = await r.json();
   return (j.courses || []).map(c => ({ src: "og", id: c.id, name: c.course_name || c.name, city: c.city || "", state: c.state || "", lat: c.latitude, lng: c.longitude }));
 }
@@ -571,15 +575,18 @@ function wireCoursePicker(form) {
     const savedNear = state.courses.filter(c => c.lat != null).map(c => ({ c, mi: miles(loc.lat, loc.lng, c.lat, c.lng) })).filter(x => x.mi < 30).sort((a, b) => a.mi - b.mi);
     const savedHtml = savedNear.slice(0, 6).map(x => savedBtn(x.c, x.mi)).join("");
     box.innerHTML = savedHtml + `<div class="muted small">Looking for courses nearby…</div>`;
-    const [og, osm] = await Promise.all([ogNear(loc), osmNear(loc)]);
-    if (my !== seq) return;
     const seen = new Set(savedNear.map(x => normName(x.c.name)));
-    const list = [];
-    for (const c of [...og, ...osm].sort((a, b) => a.mi - b.mi)) {
-      const k = normName(c.name); if (!k || seen.has(k)) continue;
-      seen.add(k); list.push(c);
-    }
-    box.innerHTML = savedHtml + (list.slice(0, 12).map(onlineBtn).join("") || (savedHtml ? "" : `<div class="muted small">Couldn't find courses nearby right now. Type the course name instead.</div>`));
+    const found = [];
+    const show = done => {
+      if (my !== seq) return;
+      const list = found.filter(c => c.mi < 30).sort((a, b) => a.mi - b.mi).slice(0, 12);
+      box.innerHTML = savedHtml + list.map(onlineBtn).join("") + (done ? (list.length || savedHtml ? "" : `<div class="muted small">Couldn't find courses nearby right now. Type the course name instead.</div>`) : `<div class="muted small">Looking for more…</div>`);
+    };
+    const add = arr => { for (const c of arr) { const k = normName(c.name); if (!k || seen.has(k)) continue; seen.add(k); found.push(c); } };
+    const quick = nominatimNear(loc).then(arr => { add(arr); show(false); });
+    const slow = osmNear(loc).then(add);
+    await Promise.allSettled([quick, slow]);
+    show(true);
   };
 
   box.addEventListener("click", async e => {
@@ -588,7 +595,7 @@ function wireCoursePicker(form) {
     if (b.dataset.tee) return fill(JSON.parse(decodeURIComponent(b.dataset.tee)));
     if (!b.dataset.pick) return;
     let c = JSON.parse(decodeURIComponent(b.dataset.pick));
-    box.innerHTML = `<div class="muted small">Loading tees…</div>`;
+    box.innerHTML = `<div class="muted small">Checking for tee ratings…</div>`;
     const base = { name: c.name, city: c.city, state: c.state, lat: c.lat, lng: c.lng };
     let id = c.id;
     if (!id) { // OpenStreetMap only: look for the same course in OpenGolfAPI

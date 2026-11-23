@@ -609,10 +609,27 @@ function layoutsFor(base) {
   if (!base.trim()) return [];
   return [...new Set(state.courses.map(c => splitName(c.name)).filter(x => x.layout && sameBase(x.base, base)).map(x => x.layout))].sort();
 }
+// Default course at a club: config.js defaultCourses, else the one you play most.
+function defaultLayout(base) {
+  const map = CFG.defaultCourses || {};
+  const k = Object.keys(map).find(x => sameBase(x, base));
+  if (k) return map[k];
+  const counts = {};
+  for (const r of [...state.rounds, ...state.matches]) { const nm = splitName(r.course_name); if (nm.layout && sameBase(nm.base, base)) counts[nm.layout] = (counts[nm.layout] || 0) + 1; }
+  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+}
 function renderLayouts(form) {
   const box = $("#lay", form); if (!box) return;
-  const base = form.course_name.value, cur = form.layout.value.trim();
-  const known = layoutsFor(base);
+  const base = form.course_name.value;
+  const def = defaultLayout(base);
+  const known = layoutsFor(base).sort((a, b) => (b === def) - (a === def));
+  // Pick the club's usual course once when the club is chosen; the user can still tap another.
+  const key = base.trim().toLowerCase();
+  if (!form.layout.value.trim() && form.dataset.layOther !== "1" && def && known.includes(def) && form.dataset.autoLay !== key) {
+    form.dataset.autoLay = key; form.layout.value = def;
+    if (form._showTees && !form.rating.value) setTimeout(() => form._showTees(joinName(base.trim(), def)), 0);
+  }
+  const cur = form.layout.value.trim();
   const showInput = form.dataset.layOther === "1" || (cur && !known.includes(cur));
   if (!base.trim()) { box.innerHTML = ""; form.layout.hidden = true; return; }
   form.layout.hidden = !showInput;
@@ -621,6 +638,7 @@ function renderLayouts(form) {
     : `<button type="button" class="link" data-lay="__other">${showInput ? "Course name at this club:" : "More than one course here?"}</button>`;
 }
 function wireLayouts(form, showTees) {
+  form._showTees = showTees;
   $("#lay", form).addEventListener("click", e => {
     const b = e.target.closest("[data-lay]"); if (!b) return;
     if (b.dataset.lay === "__other") { form.dataset.layOther = "1"; form.layout.value = ""; renderLayouts(form); form.layout.focus(); return; }
@@ -660,8 +678,8 @@ function wireCoursePicker(form) {
     form.lat.value = c.lat ?? ""; form.lng.value = c.lng ?? ""; form.pars.value = c.pars?.length ? JSON.stringify(c.pars) : ""; form.sis.value = c.sis?.length ? JSON.stringify(c.sis) : "";
     box.innerHTML = ""; renderLayouts(form);
     form.dispatchEvent(new CustomEvent("coursepicked", { detail: c }));
-    if (!nm.layout && !c.rating && layoutsFor(nm.base).length) { toast("Pick which course at this club."); return; }
-    if (!c.rating || !c.slope) { toast("Add the tee, rating, and slope from the scorecard."); setTimeout(() => (c.tee_name ? form.rating : form.tee_name).focus(), 50); }
+    if (!nm.layout && !c.rating && layoutsFor(nm.base).length) { toast(form.layout.value ? `${form.layout.value}. Pick your tees.` : "Pick which course at this club."); return; }
+    if ((!c.rating || !c.slope) && !layoutsFor(nm.base).length) { toast("Add the tee, rating, and slope from the scorecard."); setTimeout(() => (c.tee_name ? form.rating : form.tee_name).focus(), 50); }
   };
   const savedBtn = (c, mi, teeOnly) => `<button type="button" class="opt" data-saved="${c.id}"><b>${teeOnly ? esc(c.tee_name || "Tees") : esc(c.name)}</b> ${!teeOnly && c.tee_name ? esc(c.tee_name) + " · " : ""}${c.rating}/${c.slope} · par ${c.par}${mi != null ? ` · ${mi.toFixed(1)} mi` : ""}<span class="tag">saved</span></button>`;
   const onlineBtn = c => `<button type="button" class="opt" data-pick="${encodeURIComponent(JSON.stringify(c))}"><b>${esc(c.name)}</b> <span class="muted">${esc([c.city, c.state].filter(Boolean).join(", "))}${c.mi != null ? ` · ${c.mi.toFixed(1)} mi` : ""}</span></button>`;
@@ -675,6 +693,7 @@ function wireCoursePicker(form) {
     const term = q.value.trim().toLowerCase();
     form.ogapi_id.value = ""; form.lat.value = ""; form.lng.value = ""; form.pars.value = ""; form.sis.value = "";
     if (term.length < 3) { box.innerHTML = ""; return; }
+    if (layoutsFor(q.value.trim()).length) { seq++; box.innerHTML = ""; return; } // a known club: its courses and tees show instead
     const names = [...new Set(state.courses.filter(c => c.name.toLowerCase().includes(term)).map(c => c.name))].slice(0, 6);
     const savedHtml = names.map(n => { const k = state.courses.filter(c => c.name === n).length;
       return `<button type="button" class="opt" data-savedname="${esc(n)}"><b>${esc(n)}</b> <span class="muted">${k} tee${k === 1 ? "" : "s"}</span><span class="tag">saved</span></button>`; }).join("");

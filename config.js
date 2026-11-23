@@ -7,6 +7,8 @@ window.GOLF_CONFIG = {
   tagline: "Trent vs Dad vs Logan",
   supabaseUrl: "https://vqgyeqrjvghrzxrirkff.supabase.co",
   supabaseAnonKey: "sb_publishable_pS1HaPnUl9XG3E9uusrQHw_cbul3r1I",
+  // Course a club opens on when it has more than one (otherwise the one played most).
+  defaultCourses: { "Hermitage Golf Course": "General's Retreat" },
   players: [
     { slug: "trent", name: "Trent", color: "#3987e5" },
     { slug: "dad",   name: "Dad",   color: "#d95926" },

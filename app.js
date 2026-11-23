@@ -1062,6 +1062,7 @@ function cardStory(card) {
       if (before <= 0 && up > 0 && before !== 0) moments.push({ i, kind: "swing", text: `${pname(pr.a)} took the lead back on ${holeWord(i)}` });
       else if (before >= 0 && up < 0 && before !== 0) moments.push({ i, kind: "swing", text: `${pname(pr.b)} took the lead back on ${holeWord(i)}` });
       else if (before !== 0 && up === 0) moments.push({ i, kind: "swing", text: `${pname(r > 0 ? pr.a : pr.b)} squared it on ${holeWord(i)}` });
+      else if (before === 0 && up !== 0 && pr.res.slice(0, i).some(x => x != null)) moments.push({ i, kind: "swing", text: `${pname(up > 0 ? pr.a : pr.b)} took the lead on ${holeWord(i)}` });
     });
     if (pr.done) moments.push({ i: n, kind: "great", text: pr.text });
   }
@@ -1490,6 +1491,23 @@ document.addEventListener("change", e => {
     else phraseForm();
   };
   $("#fab").onclick = addMenu;
+  // Light / dark: follows the phone until you tap the toggle, then remembers your pick.
+  const sysLight = matchMedia("(prefers-color-scheme: light)");
+  const themeNow = () => document.documentElement.dataset.theme || (sysLight.matches ? "light" : "dark");
+  const paintTheme = () => {
+    const t = themeNow();
+    $("#themebtn").textContent = t === "light" ? "☾" : "☀";
+    $("#themebtn").title = t === "light" ? "Dark mode" : "Light mode";
+    document.querySelector('meta[name="theme-color"]').content = t === "light" ? "#e2f0e6" : "#121412";
+  };
+  $("#themebtn").onclick = () => {
+    const next = themeNow() === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("golf_theme", next); } catch (e) { /* private mode */ }
+    paintTheme();
+  };
+  sysLight.addEventListener?.("change", paintTheme);
+  paintTheme();
   window.addEventListener("hashchange", route);
   let rz = null, lastW = innerWidth;
   window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (Math.abs(innerWidth - lastW) > 40) { lastW = innerWidth; render(); } }, 250); });

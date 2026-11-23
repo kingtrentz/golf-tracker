@@ -1056,7 +1056,7 @@ document.addEventListener("change", e => {
   document.title = CFG.siteTitle;
   $("#title").textContent = CFG.siteTitle;
   $("#tagline").textContent = CFG.tagline || "";
-  $(".tabs").innerHTML = PLAYERS.map(p => `<a href="#${p.slug}" data-tab="${p.slug}">${dot(p.slug)}${esc(p.name)}</a>`).join("") + `<a href="#h2h" data-tab="h2h">Head to Head</a>`;
+  $(".tabs").innerHTML = `<a href="#h2h" data-tab="h2h">Head to Head</a>` + PLAYERS.map(p => `<a href="#${p.slug}" data-tab="${p.slug}">${dot(p.slug)}${esc(p.name)}</a>`).join("");
   if (DEMO) $("#demo").hidden = false;
   else {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");

@@ -79,6 +79,26 @@ create table if not exists cards (
   updated_at timestamptz not null default now()
 );
 
+-- Bets (front 9, back 9, game, presses) on live cards; stakes + money result on matches.
+alter table cards   add column if not exists bets jsonb;
+alter table matches add column if not exists bets jsonb;
+
+-- Gallery: public "photos" storage bucket (read by anyone). Uploads and deletes go through
+-- the "gallery" edge function, which checks the phrase and hands out signed upload URLs.
+create table if not exists photos (
+  id uuid primary key default gen_random_uuid(),
+  path text not null, thumb text, caption text,
+  taken_on date not null default current_date,
+  match_id uuid references matches(id) on delete set null,
+  width int, height int,
+  created_at timestamptz not null default now()
+);
+alter table photos enable row level security;
+drop policy if exists "public read" on photos;
+create policy "public read" on photos for select to anon, authenticated using (true);
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('photos', 'photos', true, 5242880, array['image/jpeg','image/png','image/webp']) on conflict (id) do nothing;
+
 alter table courses enable row level security;
 alter table matches enable row level security;
 alter table rounds  enable row level security;
@@ -122,7 +142,7 @@ language plpgsql security definer set search_path = '' as $f$
 declare cols text; out_id uuid;
 begin
   if not private.phrase_ok(p) then raise exception 'Wrong security phrase.'; end if;
-  if tbl not in ('courses','matches','rounds','cards') then raise exception 'Bad table'; end if;
+  if tbl not in ('courses','matches','rounds','cards','photos') then raise exception 'Bad table'; end if;
   select string_agg(quote_ident(c.column_name), ',') into cols from information_schema.columns c
    where c.table_schema = 'public' and c.table_name = tbl and c.column_name in (select jsonb_object_keys(data))
      and c.column_name not in ('id','created_at','created_by');

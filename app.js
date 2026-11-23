@@ -1525,19 +1525,31 @@ function viewCard(id) {
     .sort((a, b) => (b.t.thru ? 1 : 0) - (a.t.thru ? 1 : 0) || b.p.pts - a.p.pts || a.t.toPar - b.t.toPar);
   const others = state.cards.filter(c => c.id !== id);
 
-  const top = `<section class="card live-top">
-    ${others.length ? `<div class="chips cardsw">${state.cards.map(c => `<a class="chip ${c.id === id ? "on" : ""}" href="#card/${c.id}">${esc(splitName(c.course_name).base)}</a>`).join("")}</div>` : ""}
-    <div class="lt-meta"><span class="pulse"></span><span>${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span class="lt-thru">${st.thruAll ? `thru ${st.thruAll}` : fmtShort(card.played_on)}</span></div>
-    <div class="headline">${esc(st.head)}</div>
-    ${st.moments[0] && st.thruAll && !st.head.startsWith(st.moments[0].text) ? `<div class="latest">Latest: ${esc(st.moments[0].text)}</div>` : ""}
-    <div class="lboard">${board.map(x => `<div class="lrow">
+  // Pieces of the top box, shared by the follow-along layout and the scoring layout.
+  const chips = others.length ? `<div class="chips cardsw">${state.cards.map(c => `<a class="chip ${c.id === id ? "on" : ""}" href="#card/${c.id}">${esc(splitName(c.course_name).base)}</a>`).join("")}</div>` : "";
+  const meta = `<div class="lt-meta"><span class="pulse"></span><span>${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span class="lt-thru">${st.thruAll ? `thru ${st.thruAll}` : fmtShort(card.played_on)}</span></div>`;
+  const latest = st.moments[0] && st.thruAll && !st.head.startsWith(st.moments[0].text) ? `<div class="latest">Latest: ${esc(st.moments[0].text)}</div>` : "";
+  const lboard = `<div class="lboard">${board.map(x => `<div class="lrow">
       <span class="lname">${dot(x.s)}${esc(pname(x.s))}${chip(x.s)}</span>
       <span class="lscore">${x.t.thru ? `<b>${fmtToPar(x.t.toPar)}</b><small>${x.t.gross}</small>` : `<span class="muted">–</span>`}</span>
-      <span class="lpts">${x.t.thru ? `<b>${x.p.pts}</b><small>pts</small>` : ""}</span></div>`).join("")}</div>
-    ${st.pairs.length > 1 ? `<div class="mlines">${st.pairs.map(pr => `<span>${esc(pname(pr.a))} v ${esc(pname(pr.b))}: <b>${esc(pr.text.replace(/ thru \d+$/, ""))}</b></span>`).join("")}</div>` : ""}
-    <div class="hcpline">${card.players.filter(p => pops[p].some(x => x > 0)).map(p => `${esc(pname(p))} strokes on ${pops[p].map((x, i) => x > 0 ? i + 1 + (x > 1 ? "×" + x : "") : null).filter(Boolean).join(", ")}`).join(" · ") || (card.players.length > 1 ? "Playing level, no strokes" : "")}${board.some(x => x.ch != null) ? ` · course hcp ${board.map(x => `${esc(pname(x.s))} ${x.ch ?? "–"}`).join(", ")}` : ""}</div>
-    ${!card.rating || !card.slope ? `<div class="warnt small">Add the course rating and slope (End round) so handicap strokes count.</div>` : ""}
-    ${card.sis?.length === n ? "" : `<div class="muted small">No hole handicaps saved for this course, so strokes use the standard order. <button class="link ed" data-act="cardsc" data-id="${id}">Edit scorecard</button></div>`}
+      <span class="lpts">${x.t.thru ? `<b>${x.p.pts}</b><small>pts</small>` : ""}</span></div>`).join("")}</div>`;
+  const mlines = st.pairs.length > 1 ? `<div class="mlines">${st.pairs.map(pr => `<span>${esc(pname(pr.a))} v ${esc(pname(pr.b))}: <b>${esc(pr.text.replace(/ thru \d+$/, ""))}</b></span>`).join("")}</div>` : "";
+  const hcpline = `<div class="hcpline">${card.players.filter(p => pops[p].some(x => x > 0)).map(p => `${esc(pname(p))} strokes on ${pops[p].map((x, i) => x > 0 ? i + 1 + (x > 1 ? "×" + x : "") : null).filter(Boolean).join(", ")}`).join(" · ") || (card.players.length > 1 ? "Playing level, no strokes" : "")}${board.some(x => x.ch != null) ? ` · course hcp ${board.map(x => `${esc(pname(x.s))} ${x.ch ?? "–"}`).join(", ")}` : ""}</div>`;
+  const rateWarn = !card.rating || !card.slope ? `<div class="warnt small">Add the course rating and slope (End round) so handicap strokes count.</div>` : "";
+  const noSis = card.sis?.length === n ? "" : `<div class="muted small">No hole handicaps saved for this course, so strokes use the standard order. <button class="link ed" data-act="cardsc" data-id="${id}">Edit scorecard</button></div>`;
+  // Scoring: a short status on top so the hole entry (all players' buttons) fits on one phone screen.
+  const status = `<section class="card live-top">${chips}${meta}<div class="headline">${esc(st.head)}</div>${mlines}${rateWarn}</section>`;
+  const lead = `<section class="card lbcard">${latest}${lboard}<details class="strokesd" ${viewCard._strokes ? "open" : ""}><summary class="muted small">Strokes</summary>${hcpline}${noSis}</details></section>`;
+  const top = `<section class="card live-top">
+    ${chips}
+    ${meta}
+    <div class="headline">${esc(st.head)}</div>
+    ${latest}
+    ${lboard}
+    ${mlines}
+    ${hcpline}
+    ${rateWarn}
+    ${noSis}
   </section>`;
 
   const entry = ed ? `<section class="card hole">
@@ -1576,7 +1588,7 @@ function viewCard(id) {
     ${hl.length > 6 ? `<details><summary class="muted small">Show all ${hl.length}</summary><div class="moments">${hl.slice(6).map(m => `<div class="mom ${m.kind}"><span class="mh2">${m.i < n ? m.i + 1 : "F"}</span>${esc(m.text)}</div>`).join("")}</div></details>` : ""}</section>` : "";
 
   const endBtn = ed ? `<div class="endwrap"><button class="endbtn" data-act="finish" data-id="${id}">${card.players.every(p => cardTotals(card, p).done) ? "Submit round" : "End round"}</button></div>` : "";
-  return `${top}${entry}${endBtn}${betsBox(card)}${highlights}
+  return `${ed ? status + entry + endBtn + lead : top + entry + endBtn}${betsBox(card)}${highlights}
   <section class="card"><h3>Scorecard</h3>${grid(0)}${grid(1)}
     <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span><span><i class="popk"></i>stroke hole</span><span><i class="wonk"></i>won the hole</span></div></section>
   <div class="ed acts center"><button class="link" data-act="cardsc" data-id="${id}">Edit scorecard</button><button class="link" data-act="card-del" data-id="${id}">Delete scorecard</button></div>`;
@@ -1916,6 +1928,8 @@ document.addEventListener("click", e => {
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
   if (["hole", "sc", "par"].includes(act)) cardAction(act, b);
 });
+// Keep the Strokes section open or closed while the live card redraws.
+document.addEventListener("toggle", e => { if (e.target.classList?.contains("strokesd")) viewCard._strokes = e.target.open; }, true);
 document.addEventListener("change", e => {
   if (e.target.id === "calcCourse") {
     const c = state.courses.find(x => x.id === e.target.value);

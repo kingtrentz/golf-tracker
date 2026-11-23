@@ -494,3 +494,13 @@ button.primary.big { width: 100%; padding: 14px; font-size: 17px; }
 .pickbtn input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .phprev { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 10px; }
 .phprev img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 5px; }
+/* Live card while scoring: leaderboard in its own box, strokes tucked away */
+.lbcard .latest { margin: 0 0 6px; }
+.lbcard .lboard { margin-top: 0; }
+.lbcard .lrow:first-child { border-top: 0; padding-top: 2px; }
+.strokesd { margin-top: 8px; }
+.strokesd summary { padding: 4px 0; }
+.strokesd[open] summary { color: var(--text-2); }
+.strokesd .hcpline { margin-top: 4px; }
+.strokesd summary::after { content: " ▸"; }
+.strokesd[open] summary::after { content: " ▾"; }

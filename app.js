@@ -922,18 +922,54 @@ function readCourse(f) {
 function roundForm(r) {
   const editing = !!r;
   r = r || { player: localStorage.getItem("golf_me") || (state.tab !== "h2h" ? state.tab : PLAYERS[0].slug), played_on: today(), holes: 18 };
+  // Up to 3 most recently played courses (course + tee) for one-tap fill.
+  const recent = [];
+  for (const x of [...state.rounds].sort(byDate).reverse()) {
+    const k = (x.course_name + "|" + (x.tee_name || "")).toLowerCase();
+    if (!x.course_name || recent.some(y => y.k === k)) continue;
+    recent.push({ k, x }); if (recent.length === 3) break;
+  }
   openModal(`<h2>${editing ? "Edit round" : "Post a round"}</h2>
     <form id="rf">
+      ${recent.length ? `<div class="laylbl">Recent courses</div><div class="chips recent">${recent.map(({ x }, i) => { const nm = splitName(x.course_name);
+        return `<button type="button" class="chip" data-recent="${i}">${esc(nm.layout || nm.base)}${x.tee_name ? " · " + esc(x.tee_name) : ""}</button>`; }).join("")}</div>` : ""}
       <label>Player<select name="player">${PLAYERS.map(p => `<option value="${p.slug}" ${p.slug === r.player ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
       <div class="row2"><label>Date<input type="date" name="played_on" value="${r.played_on}" required></label>
       <label>Holes<select name="holes"><option ${r.holes === 18 ? "selected" : ""}>18</option><option ${r.holes === 9 ? "selected" : ""}>9</option></select></label></div>
       ${courseFields(r)}
-      <label>Final score<input name="score" inputmode="numeric" required value="${r.score ?? ""}"></label>
+      <label>Final score<input name="score" class="bigscore" inputmode="numeric" required value="${r.score ?? ""}"></label>
       <label>Notes<input name="notes" value="${esc(r.notes || "")}" placeholder="optional"></label>
       <p class="hint">9-hole rounds are saved but don't count toward the handicap.</p>
       <div class="acts"><button class="primary" type="submit">Save</button>${editing ? `<button type="button" class="danger" id="del">Delete</button>` : ""}</div>
     </form>`, m => {
     const f = $("#rf", m); wireCoursePicker(f);
+    // Tee details from a saved course hide behind a link; tap it to see or change them.
+    const teeRow = $(".row4", f), teeHint = f.querySelector(".row4 ~ p.hint");
+    teeRow.insertAdjacentHTML("beforebegin", `<button type="button" class="link teelink" hidden></button>`);
+    const teeLink = $(".teelink", f);
+    const savedTee = () => { const name = joinName(f.course_name.value.trim(), f.layout.value.trim()).toLowerCase(), tee = f.tee_name.value.trim().toLowerCase();
+      return state.courses.find(c => c.name.toLowerCase() === name && (c.tee_name || "").toLowerCase() === tee && c.rating === Number(f.rating.value) && c.slope === Number(f.slope.value) && c.par === Number(f.par.value)); };
+    const syncTee = () => {
+      const c = savedTee(), hide = !!c && !f.dataset.showTee;
+      teeRow.hidden = hide; if (teeHint) teeHint.hidden = hide; teeLink.hidden = !hide;
+      if (c) teeLink.textContent = `Tee details: ${c.tee_name || "Tees"} ${c.rating}/${c.slope} · par ${c.par}`;
+    };
+    teeLink.onclick = () => { f.dataset.showTee = "1"; syncTee(); };
+    f.addEventListener("coursepicked", () => setTimeout(syncTee, 0));
+    f.addEventListener("input", e => { if (e.target.closest(".row4")) return; syncTee(); });
+    f.querySelector(".recent")?.addEventListener("click", e => {
+      const b = e.target.closest("[data-recent]"); if (!b) return;
+      const x = recent[+b.dataset.recent].x;
+      const c = state.courses.find(c => c.id === x.course_id) || state.courses.find(c => c.name === x.course_name && (c.tee_name || "") === (x.tee_name || "")) || { ...x, name: x.course_name };
+      const nm = splitName(c.name); f.course_name.value = nm.base; f.layout.value = nm.layout; f.dataset.layOther = "";
+      f.tee_name.value = c.tee_name || ""; f.rating.value = c.rating ?? ""; f.slope.value = c.slope ?? ""; f.par.value = c.par ?? "";
+      f.ogapi_id.value = c.ogapi_id || ""; f.city.value = c.city || ""; f.state.value = c.state || "";
+      f.lat.value = c.lat ?? ""; f.lng.value = c.lng ?? ""; f.pars.value = c.pars?.length ? JSON.stringify(c.pars) : ""; f.sis.value = c.sis?.length ? JSON.stringify(c.sis) : "";
+      $("#cres", f).innerHTML = ""; renderLayouts(f);
+      f.querySelectorAll(".recent .chip").forEach(y => y.classList.toggle("on", y === b));
+      f.dataset.showTee = ""; syncTee(); f.score.focus();
+    });
+    syncTee();
     f.onsubmit = async e => {
       e.preventDefault();
       const c = readCourse(f);

@@ -923,6 +923,22 @@ const fmtToPar = d => d === 0 ? "E" : d > 0 ? "+" + d : String(d);
 // Course handicap for each player on this card, from their handicap going in.
 const cardCh = (card, s) => roundCh(currentIndex(s).index, { rating: card.rating, slope: card.slope, par: card.par || card.pars.reduce((a, b) => a + b, 0) }, card.pars.length);
 const cardPts = (card, s) => stableford(holeVals(card, s), card.pars, card.sis, cardCh(card, s));
+// Match strokes ("pops"): strokes off the lowest handicap in the group, on the hardest holes.
+function matchPops(card) {
+  const n = card.pars.length, si = strokeIndex(card.pars, card.sis);
+  const chs = Object.fromEntries(card.players.map(s => [s, cardCh(card, s) ?? 0]));
+  const low = Math.min(...Object.values(chs));
+  return Object.fromEntries(card.players.map(s => [s, card.pars.map((_, i) => card.players.length > 1 ? strokesOn(chs[s] - low, si[i], n) : 0)]));
+}
+// Who won each hole: lowest net score with match strokes, outright (ties = halved).
+function holeWinners(card, pops) {
+  return card.pars.map((_, i) => {
+    if (card.players.length < 2 || card.players.some(p => holeVals(card, p)[i] == null)) return undefined;
+    const nets = card.players.map(p => [p, holeVals(card, p)[i] - pops[p][i]]);
+    const best = Math.min(...nets.map(x => x[1])); const w = nets.filter(x => x[1] === best);
+    return w.length === 1 ? w[0][0] : null;
+  });
+}
 const cardPairs = card => pairsOf(card.players).map(([a, b]) => matchPlay(a, b, holeVals(card, a), holeVals(card, b), cardCh(card, a), cardCh(card, b), card.pars, card.sis));
 // Top of every tab: the round happening now, else today's, else the next one.
 const cardForMatch = id => state.cards.find(c => c.match_id === id);
@@ -1076,6 +1092,8 @@ function viewCard(id) {
   const ed = editing();
   const st = cardStory(card);
   const si = strokeIndex(card.pars, card.sis);
+  const pops = matchPops(card);
+  const wins = holeWinners(card, pops);
   const two = st.pairs.length === 1 ? st.pairs[0] : null;
   const chip = s => { if (!two || !two.thru) return ""; const me = (s === two.a ? 1 : -1) * two.up;
     return me > 0 ? `<span class="mchip up">${me} UP</span>` : me === 0 ? `<span class="mchip as">AS</span>` : ""; };
@@ -1093,7 +1111,7 @@ function viewCard(id) {
       <span class="lscore">${x.t.thru ? `<b>${fmtToPar(x.t.toPar)}</b><small>${x.t.gross}</small>` : `<span class="muted">–</span>`}</span>
       <span class="lpts">${x.t.thru ? `<b>${x.p.pts}</b><small>pts</small>` : ""}</span></div>`).join("")}</div>
     ${st.pairs.length > 1 ? `<div class="mlines">${st.pairs.map(pr => `<span>${esc(pname(pr.a))} v ${esc(pname(pr.b))}: <b>${esc(pr.text.replace(/ thru \d+$/, ""))}</b></span>`).join("")}</div>` : ""}
-    <div class="hcpline">${st.pairs.map(pr => pr.getter ? `${esc(pname(pr.getter))} gets ${pr.strokes} from ${esc(pname(pr.getter === pr.a ? pr.b : pr.a))}` : `${esc(pname(pr.a))} and ${esc(pname(pr.b))} play level`).join(" · ")}${board.some(x => x.ch != null) ? ` · course hcp ${board.map(x => `${esc(pname(x.s))} ${x.ch ?? "–"}`).join(", ")}` : ""}</div>
+    <div class="hcpline">${card.players.filter(p => pops[p].some(x => x > 0)).map(p => `${esc(pname(p))} strokes on ${pops[p].map((x, i) => x > 0 ? i + 1 + (x > 1 ? "×" + x : "") : null).filter(Boolean).join(", ")}`).join(" · ") || (card.players.length > 1 ? "Playing level, no strokes" : "")}${board.some(x => x.ch != null) ? ` · course hcp ${board.map(x => `${esc(pname(x.s))} ${x.ch ?? "–"}`).join(", ")}` : ""}</div>
     ${!card.rating || !card.slope ? `<div class="warnt small">Add the course rating and slope (Finish round) so handicap strokes count.</div>` : ""}
     ${card.sis?.length === n ? "" : `<div class="muted small">No hole handicaps saved for this course, so strokes use the standard order. <button class="link ed" data-act="cardsc" data-id="${id}">Edit scorecard</button></div>`}
   </section>`;
@@ -1101,21 +1119,22 @@ function viewCard(id) {
   const entry = ed ? `<section class="card hole">
       <div class="hhead">
         <button class="nav" data-act="hole" data-v="${hole - 1}" ${hole === 0 ? "disabled" : ""} aria-label="Previous hole">‹</button>
-        <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="cardsc" data-id="${id}">Par ${card.pars[hole]} · Hcp ${si[hole]}</button></div>
+        <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="cardsc" data-id="${id}">Par ${card.pars[hole]} · Hcp ${si[hole]}</button>
+          <div class="popline">${wins[hole] !== undefined ? (wins[hole] ? `<span class="hwin">${esc(pname(wins[hole]))} wins the hole</span>` : `<span class="hhalf">Hole halved</span>`) : ""}${(() => { if (wins[hole] !== undefined) return ""; const g = card.players.filter(p => pops[p][hole] > 0); return card.players.length < 2 ? "" : g.length ? `${g.map(p => esc(pname(p))).join(" & ")} ${g.length > 1 ? "stroke" : "strokes"} here` : "No strokes here"; })()}</div></div>
         <button class="nav" data-act="hole" data-v="${hole + 1}" ${hole === n - 1 ? "disabled" : ""} aria-label="Next hole">›</button>
       </div>
       ${card.players.map(s => {
         const v = holeVals(card, s)[hole];
-        const gets = strokesOn(cardCh(card, s) ?? 0, si[hole], n); const hp = st.pts[s].per[hole];
+        const pop = pops[s][hole]; const hp = st.pts[s].per[hole];
         return `<div class="prow">
-          <div class="pn">${dot(s)}${esc(pname(s))}${gets > 0 ? `<span class="sdots" title="handicap strokes on this hole">${"●".repeat(Math.min(gets, 3))}</span>` : ""}<div class="ps">${hp != null ? `${hp} pt${hp === 1 ? "" : "s"}` : gets > 0 ? `gets ${gets}` : "&nbsp;"}</div></div>
+          <div class="pn">${dot(s)}${esc(pname(s))}${pop > 0 ? `<span class="popb">${pop > 1 ? pop + " strokes" : "stroke"}</span>` : ""}<div class="ps">${hp != null ? `${hp} pt${hp === 1 ? "" : "s"}` : "&nbsp;"}</div></div>
           <button class="step" data-act="sc" data-s="${s}" data-d="-1" aria-label="${esc(pname(s))} one less">−</button>
           <button class="val ${v == null ? "empty" : scoreCls(v, card.pars[hole])}" data-act="sc" data-s="${s}" data-d="0" aria-label="${esc(pname(s))} score">${v ?? card.pars[hole]}</button>
           <button class="step" data-act="sc" data-s="${s}" data-d="1" aria-label="${esc(pname(s))} one more">+</button>
         </div>`;
       }).join("")}
-      <div class="hfoot"><span id="savestate" class="savestate"></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Finish round</button>`}</div>
-      <p class="hint">Tap the number for par, − and + for anything else. ● = handicap stroke here.</p>
+      <div class="hfoot"><span><span id="savestate" class="savestate"></span><span id="autoadv" class="autoadv"></span></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Finish round</button>`}</div>
+      <p class="hint">Tap the number for par, − and + for anything else. Once everyone has a score it moves to the next hole.</p>
     </section>` : `<p class="hint center">Updates by itself. Tap Enter scores to keep score.</p>`;
 
   const grid = half => {
@@ -1125,7 +1144,8 @@ function viewCard(id) {
     return `<table class="sc"><thead><tr><th>${half === 0 ? "Out" : "In"}</th>${idx.map(i => `<th class="${ed && i === hole ? "cur" : ""}" ${ed ? `data-act="hole" data-v="${i}"` : ""}>${i + 1}</th>`).join("")}<th>Tot</th></tr>
       <tr class="par"><td>Par</td>${idx.map(i => `<td>${card.pars[i]}</td>`).join("")}<td>${sum(idx.map(i => card.pars[i]))}</td></tr></thead>
       <tbody>${card.players.map(s => { const v = holeVals(card, s); const got = idx.filter(i => v[i] != null);
-        return `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}</td>${idx.map(i => `<td><span class="${v[i] == null ? "" : scoreCls(v[i], card.pars[i])}">${v[i] ?? ""}</span></td>`).join("")}<td><b>${got.length ? sum(got.map(i => v[i])) : ""}</b></td></tr>`; }).join("")}</tbody></table>`;
+        return `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}</td>${idx.map(i => `<td class="${pops[s][i] > 0 ? "pop" : ""} ${wins[i] === s ? "won" : ""}"><span class="${v[i] == null ? "" : scoreCls(v[i], card.pars[i])}">${v[i] ?? ""}</span></td>`).join("")}<td><b>${got.length ? sum(got.map(i => v[i])) : ""}</b></td></tr>`; }).join("")}${two ? (() => { let up = 0; const run = card.pars.map((_, i) => { if (wins[i] === undefined) return null; up += wins[i] === two.a ? 1 : wins[i] === two.b ? -1 : 0; return up; });
+        return `<tr class="mrow"><td>Match</td>${idx.map(i => run[i] == null ? "<td></td>" : `<td><span class="ms" style="color:${run[i] ? P[run[i] > 0 ? two.a : two.b].color : "var(--muted)"}">${run[i] ? Math.abs(run[i]) : "AS"}</span></td>`).join("")}<td></td></tr>`; })() : ""}</tbody></table>`;
   };
   const hl = st.moments.filter(m => m.i < n || m.kind === "great");
   const highlights = hl.length ? `<section class="card"><h3>Highlights</h3><div class="moments">${hl.slice(0, 6).map(m => `<div class="mom ${m.kind}"><span class="mh2">${m.i < n ? m.i + 1 : "F"}</span>${esc(m.text)}</div>`).join("")}</div>
@@ -1133,7 +1153,7 @@ function viewCard(id) {
 
   return `${top}${entry}${highlights}
   <section class="card"><h3>Scorecard</h3>${grid(0)}${grid(1)}
-    <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span></div></section>
+    <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span><span><i class="popk"></i>stroke hole</span><span><i class="wonk"></i>won the hole</span></div></section>
   <div class="ed acts center"><button class="link" data-act="cardsc" data-id="${id}">Edit scorecard</button><button class="link" data-act="card-del" data-id="${id}">Delete scorecard</button></div>`;
 }
 const scoreCls = (v, par) => v < par - 1 ? "sc-e" : v === par - 1 ? "sc-b" : v === par ? "sc-p" : v === par + 1 ? "sc-o" : "sc-d";
@@ -1145,7 +1165,7 @@ function firstOpenHole(card) {
 
 function cardAction(act, b) {
   const id = state.cardId; const card = cardById(id); if (!card) return;
-  if (act === "hole") { localStorage.setItem("golf_hole_" + id, b.dataset.v); render(); window.scrollTo({ top: 0, behavior: "smooth" }); return; }
+  if (act === "hole") { clearTimeout(cardAction._adv); localStorage.setItem("golf_hole_" + id, b.dataset.v); render(); return; }
   if (!editing()) return phraseForm();
   if (act === "sc") {
     const s = b.dataset.s, d = Number(b.dataset.d);
@@ -1154,7 +1174,16 @@ function cardAction(act, b) {
     let v = arr[hole];
     if (d === 0) v = v == null ? par : v; else v = Math.min(15, Math.max(1, (v ?? par) + d));
     arr[hole] = v; card.scores = { ...card.scores, [s]: arr };
+    clearTimeout(cardAction._adv);
     render(); queueSave(card, s);
+    // Everyone has a score on this hole: move on after a short pause (any tap cancels or restarts it).
+    if (hole < card.pars.length - 1 && card.players.every(p => holeVals(card, p)[hole] != null)) {
+      const note = $("#autoadv"); if (note) note.textContent = `Hole ${hole + 2} next…`;
+      cardAction._adv = setTimeout(() => {
+        if (state.tab !== "card" || state.cardId !== id || Number(localStorage.getItem("golf_hole_" + id) ?? hole) !== hole) return;
+        localStorage.setItem("golf_hole_" + id, hole + 1); render();
+      }, 1600);
+    }
   }
   if (act === "par") {
     const h = Number(b.dataset.v); const p = card.pars[h];

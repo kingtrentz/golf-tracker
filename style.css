@@ -348,3 +348,5 @@ h3.inl { display: inline; }
 .seg2 button.on { background: var(--accent); color: #06140b; font-weight: 700; }
 button.primary.big { width: 100%; padding: 14px; font-size: 17px; }
 .spot .acts .ss { margin: 0 0 0 4px; }
+.endwrap { margin: -4px 0 12px; }
+.endbtn { width: 100%; padding: 12px; font-weight: 700; background: transparent; border: 1px solid #5a4a1a; color: var(--gold); border-radius: 12px; }

@@ -4,14 +4,14 @@
 // Leave them blank to run the site on demo data.
 window.GOLF_CONFIG = {
   siteTitle: "McGrath Masters",
-  tagline: "Trent vs Dad vs Logan",
+  tagline: "Trent vs Logan vs Dad",
   supabaseUrl: "https://vqgyeqrjvghrzxrirkff.supabase.co",
   supabaseAnonKey: "sb_publishable_pS1HaPnUl9XG3E9uusrQHw_cbul3r1I",
   // Course a club opens on when it has more than one (otherwise the one played most).
   defaultCourses: { "Hermitage Golf Course": "General's Retreat" },
   players: [
     { slug: "trent", name: "Trent", color: "#3987e5" },
-    { slug: "dad",   name: "Dad",   color: "#d95926" },
-    { slug: "logan", name: "Logan", color: "#199e70" }
+    { slug: "logan", name: "Logan", color: "#199e70" },
+    { slug: "dad",   name: "Dad",   color: "#d95926" }
   ]
 };

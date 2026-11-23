@@ -1118,7 +1118,7 @@ function viewCard(id) {
       <span class="lpts">${x.t.thru ? `<b>${x.p.pts}</b><small>pts</small>` : ""}</span></div>`).join("")}</div>
     ${st.pairs.length > 1 ? `<div class="mlines">${st.pairs.map(pr => `<span>${esc(pname(pr.a))} v ${esc(pname(pr.b))}: <b>${esc(pr.text.replace(/ thru \d+$/, ""))}</b></span>`).join("")}</div>` : ""}
     <div class="hcpline">${card.players.filter(p => pops[p].some(x => x > 0)).map(p => `${esc(pname(p))} strokes on ${pops[p].map((x, i) => x > 0 ? i + 1 + (x > 1 ? "×" + x : "") : null).filter(Boolean).join(", ")}`).join(" · ") || (card.players.length > 1 ? "Playing level, no strokes" : "")}${board.some(x => x.ch != null) ? ` · course hcp ${board.map(x => `${esc(pname(x.s))} ${x.ch ?? "–"}`).join(", ")}` : ""}</div>
-    ${!card.rating || !card.slope ? `<div class="warnt small">Add the course rating and slope (Finish round) so handicap strokes count.</div>` : ""}
+    ${!card.rating || !card.slope ? `<div class="warnt small">Add the course rating and slope (End round) so handicap strokes count.</div>` : ""}
     ${card.sis?.length === n ? "" : `<div class="muted small">No hole handicaps saved for this course, so strokes use the standard order. <button class="link ed" data-act="cardsc" data-id="${id}">Edit scorecard</button></div>`}
   </section>`;
 
@@ -1139,7 +1139,7 @@ function viewCard(id) {
           <button class="step" data-act="sc" data-s="${s}" data-d="1" aria-label="${esc(pname(s))} one more">+</button>
         </div>`;
       }).join("")}
-      <div class="hfoot"><span><span id="savestate" class="savestate"></span><span id="autoadv" class="autoadv"></span></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Finish round</button>`}</div>
+      <div class="hfoot"><span><span id="savestate" class="savestate"></span><span id="autoadv" class="autoadv"></span></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Submit round</button>`}</div>
       <p class="hint">Tap the number for par, − and + for anything else. Once everyone has a score it moves to the next hole.</p>
     </section>` : `<p class="hint center">Updates by itself. Tap Enter scores to keep score.</p>`;
 
@@ -1157,7 +1157,8 @@ function viewCard(id) {
   const highlights = hl.length ? `<section class="card"><h3>Highlights</h3><div class="moments">${hl.slice(0, 6).map(m => `<div class="mom ${m.kind}"><span class="mh2">${m.i < n ? m.i + 1 : "F"}</span>${esc(m.text)}</div>`).join("")}</div>
     ${hl.length > 6 ? `<details><summary class="muted small">Show all ${hl.length}</summary><div class="moments">${hl.slice(6).map(m => `<div class="mom ${m.kind}"><span class="mh2">${m.i < n ? m.i + 1 : "F"}</span>${esc(m.text)}</div>`).join("")}</div></details>` : ""}</section>` : "";
 
-  return `${top}${entry}${highlights}
+  const endBtn = ed ? `<div class="endwrap"><button class="endbtn" data-act="finish" data-id="${id}">${card.players.every(p => cardTotals(card, p).done) ? "Submit round" : "End round"}</button></div>` : "";
+  return `${top}${entry}${endBtn}${highlights}
   <section class="card"><h3>Scorecard</h3>${grid(0)}${grid(1)}
     <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span><span><i class="popk"></i>stroke hole</span><span><i class="wonk"></i>won the hole</span></div></section>
   <div class="ed acts center"><button class="link" data-act="cardsc" data-id="${id}">Edit scorecard</button><button class="link" data-act="card-del" data-id="${id}">Delete scorecard</button></div>`;
@@ -1386,13 +1387,13 @@ function finishForm(id) {
   const card = cardById(id); if (!card) return;
   const n = card.pars.length; const parSum = card.pars.reduce((a, b) => a + b, 0);
   const rows = card.players.map(s => ({ s, t: cardTotals(card, s) }));
-  openModal(`<h2>Finish round</h2><p class="hint">${esc(card.course_name)} · ${fmtDate(card.played_on)}</p>
+  openModal(`<h2>Submit round</h2><p class="hint">${esc(card.course_name)} · ${fmtDate(card.played_on)}</p>
     <form id="ff">
       ${courseFields({ ...card, par: n === 18 ? parSum : card.par || parSum })}
       <div class="board">${rows.map(x => `<div class="br"><span>${dot(x.s)}${esc(pname(x.s))}</span><span class="n">${x.t.done ? `<b>${x.t.gross}</b> ${fmtToPar(x.t.toPar)} · ${cardPts(card, x.s).pts} pts` : `<span class="warnt">${x.t.thru}/${n} holes, won't be posted</span>`}</span></div>`).join("")}</div>
       ${card.players.length > 1 ? `<div class="mpl">${cardPairs(card).map(pr => `<div class="mpr"><span>${esc(pname(pr.a))} v ${esc(pname(pr.b))}</span><b>${esc(pr.text)}</b></div>`).join("")}</div>` : ""}
       <p class="hint">Each finished score goes on that player's round log${card.match_id ? " and the match gets its result" : ""}.${n === 9 ? " 9-hole rounds don't count toward handicaps." : ""}</p>
-      <div class="acts"><button class="primary" type="submit">Post scores</button><button type="button" data-close>Keep playing</button></div>
+      <div class="acts"><button class="primary" type="submit">Submit round</button><button type="button" data-close>Keep playing</button></div>
     </form>`, m => {
     const f = $("#ff", m); wireCoursePicker(f);
     f.onsubmit = async e => {
@@ -1400,7 +1401,7 @@ function finishForm(id) {
       const c = readCourse(f);
       if (!c.rating || !c.slope || !c.par) return toast("Rating, slope, and par are needed for handicaps.");
       const done = rows.filter(x => x.t.done);
-      if (!done.length) return toast("Nobody has all holes scored yet.");
+      if (!done.length) { if (confirm("Nobody has every hole scored, so nothing gets posted. End this round anyway?")) { try { await save("cards", { status: "done" }, id); closeModal(); await loadData(); location.hash = "h2h"; toast("Round ended."); } catch (err) { toast(errMsg(err)); } } return; }
       const btn = f.querySelector("[type=submit]"); btn.disabled = true;
       try {
         await flushSaves();

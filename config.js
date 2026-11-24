@@ -3,7 +3,7 @@
 // The anon key is meant to be public; the database rules decide who can write.
 // Leave them blank to run the site on demo data.
 window.GOLF_CONFIG = {
-  siteTitle: "McGrath Masters",
+  siteTitle: "The McGrath Masters",
   tagline: "Trent vs Logan vs Dad",
   supabaseUrl: "https://vqgyeqrjvghrzxrirkff.supabase.co",
   supabaseAnonKey: "sb_publishable_pS1HaPnUl9XG3E9uusrQHw_cbul3r1I",

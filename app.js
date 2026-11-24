@@ -2157,7 +2157,10 @@ document.addEventListener("change", e => {
 
 (async function init() {
   document.title = CFG.siteTitle;
-  $("#title").textContent = CFG.siteTitle;
+  // "The" sits small and centered above the name
+  const tm = /^the\s+/i.test(CFG.siteTitle) ? CFG.siteTitle.replace(/^the\s+/i, "") : null;
+  if (tm) $("#title").innerHTML = `<span class="tw"><small class="the">The</small><span>${esc(tm)}</span></span>`;
+  else $("#title").textContent = CFG.siteTitle;
   $("#tagline").textContent = CFG.tagline || "";
   renderTabs();
   $("#lockbtn").onclick = () => { if (confirm("Lock this phone? You'll need the family phrase to get back in.")) lock(); };

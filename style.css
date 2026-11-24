@@ -606,6 +606,10 @@ html.locked .gate { display: flex; position: fixed; inset: 0; z-index: 100; alig
 .gbox { width: 100%; max-width: 340px; display: grid; gap: 12px; text-align: center; }
 .gcrest { width: 120px; height: auto; margin: 0 auto 4px; filter: drop-shadow(0 6px 18px #0006); }
 .gtitle { margin: 0; font-size: 28px; font-family: Georgia, "Times New Roman", serif; }
+.gtitle .the { display: block; margin-bottom: 2px; }
+.the { font-size: 10.5px; font-weight: 600; letter-spacing: .32em; text-transform: uppercase; color: var(--text-2); font-family: Georgia, "Times New Roman", serif; padding-left: .32em; line-height: 1.1; }
+h1 .tw { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; line-height: 1.05; }
+h1:has(.tw)::before { vertical-align: middle; }
 .gsub { margin: 0 0 6px; color: var(--text-2); font-size: 14px; }
 .gbox input { text-align: center; font-size: 18px; padding: 13px; }
 .gbox button.primary { padding: 13px; font-size: 17px; }

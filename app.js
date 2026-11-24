@@ -2591,20 +2591,32 @@ $("#al-off").addEventListener("click", async () => {
   document.documentElement.classList.add("app");
   const ind = document.createElement("div"); ind.className = "ptr"; ind.setAttribute("aria-hidden", "true"); document.body.appendChild(ind);
   const busy = () => !$("#modal").hidden;
-  const go = () => { ind.textContent = "Refreshing…"; ind.classList.add("on"); ind.style.transform = "translate(-50%,0)"; location.reload(); };
-  let y0 = null, d = 0;
+  const go = () => { ind.textContent = "Refreshing…"; ind.classList.add("rel"); ind.style.opacity = "1"; ind.style.transform = "translate3d(-50%,14px,0)"; location.reload(); };
+  // Follows the finger on the GPU, one style write per frame, text changes only at the threshold,
+  // springs back with a short ease on release.
+  let y0 = null, d = 0, raf = 0, armed = null;
+  const paint = () => {
+    raf = 0;
+    if (y0 === null) return;
+    const pull = Math.max(0, d - 10), y = 90 * (1 - Math.exp(-pull / 80)) - 40;
+    ind.style.transform = `translate3d(-50%,${y.toFixed(1)}px,0)`;
+    ind.style.opacity = Math.min(1, pull / 40).toFixed(2);
+    const a = d > 90;
+    if (a !== armed) { armed = a; ind.textContent = a ? "Let go to refresh" : "Pull to refresh"; }
+  };
   addEventListener("touchstart", e => {
-    y0 = (scrollY <= 0 && e.touches.length === 1 && !busy() && !e.target.closest("canvas,svg,input,textarea,select,.tabs")) ? e.touches[0].clientY : null; d = 0;
+    y0 = (scrollY <= 0 && e.touches.length === 1 && !busy() && !e.target.closest("canvas,svg,input,textarea,select,.tabs")) ? e.touches[0].clientY : null; d = 0; armed = null;
+    if (y0 !== null) ind.classList.remove("rel");
   }, { passive: true });
   addEventListener("touchmove", e => {
     if (y0 === null) return;
     d = e.touches[0].clientY - y0;
-    if (d <= 10) { ind.classList.remove("on"); return; }
-    ind.classList.add("on");
-    ind.style.transform = `translate(-50%,${Math.min(d, 140) / 2 - 20}px)`;
-    ind.textContent = d > 90 ? "Let go to refresh" : "Pull to refresh";
+    if (!raf) raf = requestAnimationFrame(paint);
   }, { passive: true });
-  addEventListener("touchend", () => { if (y0 !== null && d > 90) go(); else ind.classList.remove("on"); y0 = null; d = 0; });
+  addEventListener("touchend", () => {
+    if (y0 !== null && d > 90) { y0 = null; go(); return; }
+    y0 = null; d = 0; ind.classList.add("rel"); ind.style.transform = "translate3d(-50%,-60px,0)"; ind.style.opacity = "0";
+  }, { passive: true });
   $("#upd").addEventListener("click", () => { if (!busy()) go(); });
   let away = 0;
   document.addEventListener("visibilitychange", () => { if (document.hidden) away = Date.now(); else if (away && Date.now() - away > 5 * 60000 && !busy()) location.reload(); });

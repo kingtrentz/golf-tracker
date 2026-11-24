@@ -570,7 +570,8 @@ main { padding-bottom: 14px; }
 button.upd { background: none; border: 0; padding: 2px 6px; color: var(--muted); font-size: 12px; justify-self: center; cursor: default; }
 html.app button.upd { cursor: pointer; text-decoration: underline dotted; }
 .ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 6px); transform: translate(-50%, -60px); z-index: 70; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 12.5px; font-weight: 700; box-shadow: 0 4px 14px var(--shadow); opacity: 0; transition: opacity .15s; pointer-events: none; }
-.ptr.on { opacity: 1; }
+.ptr { will-change: transform, opacity; transition: none; }
+.ptr.rel { transition: transform .22s cubic-bezier(.2,.8,.2,1), opacity .18s ease; }
 /* One-tap on-demand GPS yardages button on the hole screen */
 button.yds { display: inline-flex; align-items: baseline; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--surface-2) 85%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 999px; padding: 6px 14px; margin-top: 6px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; cursor: pointer; }
 button.yds:active { transform: scale(.97); }
@@ -670,3 +671,10 @@ header h1:has(.tw)::before { display: block; margin: 0 auto 3px; width: 40px; he
 /* Caddy line under the hole number (replaces the hole map for now) */
 .hnote { margin: 2px 4px 10px; text-align: center; font-size: 13.5px; line-height: 1.35; color: var(--text-2); }
 .hnote:empty { display: none; }
+
+/* Theme switch: the page itself paints the area under the iPhone status bar (black-translucent), and the
+   root background follows the theme so the top never shows the old color. */
+html { background: var(--bg); }
+/* The iPhone status bar icons are white over the page now; in light mode a slim dark-khaki band sits under
+   them so they stay readable (zero height in the browser, where there's no inset). */
+html[data-theme="light"] body::after { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: #6b5a36; z-index: 80; pointer-events: none; }

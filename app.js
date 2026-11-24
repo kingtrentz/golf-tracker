@@ -2610,23 +2610,29 @@ $("#al-off").addEventListener("click", async () => {
   const lbl = ind.querySelector("span"), root = document.documentElement;
   const busy = () => !$("#modal").hidden || document.body.dataset.tab === "card";
   const LINE = 105;
-  let settleTimer = 0;
+  let settleTimer = 0, refreshing = false;
   const setPull = (p, mode) => {
     clearTimeout(settleTimer);
     root.classList.toggle("pulling", !mode && p > 0);
-    root.classList.toggle("settle", !!mode);
+    root.classList.toggle("settle", mode === "bounce");
+    root.classList.toggle("glide", mode === "glide");
     root.style.setProperty("--pull", p.toFixed(1) + "px");
     root.style.setProperty("--ptr-rot", (p * 2.2).toFixed(0) + "deg");
     const k = Math.min(1, p / 65);
     ind.style.opacity = k.toFixed(2);
     const y = Math.max(-34, p * 0.42 - 26);
     ind.style.transform = `translate3d(-50%,${y.toFixed(1)}px,0) scale(${(0.72 + 0.34 * k).toFixed(3)})`;
-    if (mode && p === 0) settleTimer = setTimeout(() => root.classList.remove("settle", "pulling"), 620);
+    if (mode && p === 0) settleTimer = setTimeout(() => { root.classList.remove("settle", "glide", "pulling"); ind.classList.remove("spin"); }, mode === "glide" ? 450 : 580);
   };
-  const go = () => {
+  const go = async () => {
+    if (refreshing) return;
+    refreshing = true;
     lbl.textContent = "Refreshing…"; ind.classList.add("spin");
-    setPull(96, true);
-    setTimeout(() => { setPull(0, true); setTimeout(() => location.reload(), 640); }, 520);
+    setPull(96, "glide");
+    const minSpin = new Promise(r => setTimeout(r, 580));
+    await Promise.all([minSpin, loadData().then(() => render()).catch(() => {})]);
+    setPull(0, "glide");
+    setTimeout(() => { refreshing = false; lbl.textContent = "Pull to refresh"; }, 460);
   };
   let y0 = null, d = 0, raf = 0, armed = null;
   const paint = () => {
@@ -2645,7 +2651,7 @@ $("#al-off").addEventListener("click", async () => {
   addEventListener("touchmove", e => {
     if (y0 === null) return;
     d = e.touches[0].clientY - y0;
-    if (d <= 0) { y0 = null; setPull(0, true); return; } // scrolling up: let the page scroll
+    if (d <= 0) { y0 = null; setPull(0, "glide"); return; } // scrolling up: let the page scroll
     if (d > 6) e.preventDefault();
     if (!raf) raf = requestAnimationFrame(paint);
   }, { passive: false });
@@ -2655,7 +2661,7 @@ $("#al-off").addEventListener("click", async () => {
     const maxPull = Math.max(360, innerHeight * 0.72);
     const travel = maxPull * (1 - Math.exp(-pull / (maxPull * 0.65)));
     const fire = travel > LINE; y0 = null; d = 0;
-    if (fire) go(); else setPull(0, true);
+    if (fire) go(); else setPull(0, "bounce");
   };
   addEventListener("touchend", release, { passive: true });
   addEventListener("touchcancel", release, { passive: true });

@@ -228,6 +228,7 @@ async function loadData() {
     const d = JSON.parse(JSON.stringify(window.GOLF_DEMO));
     Object.assign(state, d);
     state.cards = state.cards || [];
+    stampUpd();
     return;
   }
   const [r, m, c, pl, cd] = await Promise.all([
@@ -244,6 +245,7 @@ async function loadData() {
   state.matches = m.data.map(x => ({ ...x, rating: x.rating == null ? null : Number(x.rating), slope: x.slope == null ? null : Number(x.slope), par: x.par == null ? null : Number(x.par) }));
   state.courses = c.data.map(x => ({ ...x, rating: Number(x.rating), slope: Number(x.slope), par: Number(x.par) }));
   state.cards = (cd.data || []).map(x => ({ ...x, rating: x.rating == null ? null : Number(x.rating) }));
+  stampUpd();
 }
 
 async function rpc(fn, args) {
@@ -1479,6 +1481,7 @@ async function pullCard(id) {
     if (mine.has("__pars")) data.pars = local.pars;
     Object.assign(local, data);
   } else if (data.status === "live") state.cards.push(data);
+  stampUpd();
 }
 
 // ---------- the story so far: headline + highlights ----------
@@ -2016,4 +2019,116 @@ document.addEventListener("change", e => {
       if (saved && editing()) { c.scores = { ...c.scores, ...saved.scores }; c.pars = saved.pars || c.pars; Object.keys(saved.scores || {}).forEach(s => queueSave(c, s)); queueSave(c, "__pars"); } } catch (e) { /* ignore */ }
   }
   route();
+  alertsInit(); // after the database client is ready
+})();
+
+// ---------- Home Screen app + push alerts ----------
+// Installable (manifest + sw.js). Alerts: the phone subscribes (Web Push), the subscription is saved through
+// gt_push_sub (no phrase needed), and the "push" edge function sends tee offs, hole results and finals.
+// No VAPID key on the server = the Alerts box stays hidden.
+function stampUpd() {
+  state.updatedAt = new Date();
+  const b = document.getElementById("upd");
+  if (b) b.textContent = "Updated " + state.updatedAt.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) + (document.documentElement.classList.contains("app") ? " ↻" : "");
+}
+const inApp = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+const PUSH_FN = DEMO ? null : `${CFG.supabaseUrl}/functions/v1/push`;
+let SWREG = null, VAPID = null;
+const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+const AL_IDS = { start: "al-start", end: "al-end" };
+const HOLES_HINT = { off: "No hole alerts.", big: "Only when it matters: lead changes, the match squared, dormie, match decided, birdie or better.", all: "Every hole: who won it, match status, birdies, blowups." };
+const alState = () => { try { return JSON.parse(localStorage.getItem("golf_alerts") || "null"); } catch (e) { return null; } };
+const alSave = v => { try { localStorage.setItem("golf_alerts", JSON.stringify(v)); } catch (e) { /* private mode */ } };
+let alMe = alState()?.me ?? null, alHoles = (h => h === "all" || h === "off" ? h : "big")(alState()?.p?.holes);
+function paintMe() {
+  document.querySelectorAll("#al-holes [data-h]").forEach(b => b.classList.toggle("on", b.dataset.h === alHoles));
+  $("#al-hhint").textContent = HOLES_HINT[alHoles];
+  $("#al-me").innerHTML = [...PLAYERS.map(p => [p.slug, p.name]), [null, "Just watching"]].map(([s, n]) =>
+    `<button type="button" data-me="${s ?? ""}" class="${(alMe ?? "") === (s ?? "") ? "on" : ""}">${s ? dot(s) : ""}${esc(n)}</button>`).join("");
+  $("#al-mehint").hidden = !alMe;
+}
+async function alertsUI() {
+  const sec = $("#alerts"); if (!sec || !VAPID) return;
+  sec.hidden = false;
+  const ios = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const can = "PushManager" in window && "Notification" in window && !!SWREG;
+  const needInstall = ios && !inApp();
+  $("#alerts-install").hidden = !needInstall;
+  $("#alerts-form").hidden = needInstall || !can;
+  const note = $("#alerts-note");
+  if (!needInstall && !can) note.textContent = "This browser can't get alerts. On iPhone, add Golf to your Home Screen first.";
+  else if (!needInstall && Notification.permission === "denied") note.textContent = "Notifications are blocked for Golf. Turn them on in Settings, Notifications, Golf.";
+  const st = alState(), sub = can ? await SWREG.pushManager.getSubscription().catch(() => null) : null;
+  const on = !!(st && st.on && sub);
+  if (st && st.p) { for (const [k, id] of Object.entries(AL_IDS)) $("#" + id).checked = st.p[k] !== false; alHoles = st.p.holes === "all" || st.p.holes === "off" ? st.p.holes : "big"; }
+  paintMe();
+  $("#al-save").textContent = on ? "Save" : "Turn on alerts";
+  $("#al-off").hidden = !on;
+  $("#alerts-sum").textContent = on ? "On" + (alMe ? " · " + pname(alMe) : "") : "Phone and watch";
+  // Keep the server's copy fresh (phones rotate subscriptions now and then); once a day is plenty.
+  if (on && sb && Date.now() - (st.synced || 0) > 864e5) sb.rpc("gt_push_sub", { op: "sub", sub: sub.toJSON(), prefs: st.p, me: st.me ?? null })
+    .then(({ error }) => { if (!error) alSave({ ...st, synced: Date.now() }); });
+}
+async function alertsInit() {
+  if (DEMO || !("serviceWorker" in navigator)) return;
+  try { SWREG = await navigator.serviceWorker.register("sw.js"); } catch (e) { return; }
+  try { VAPID = (await (await fetch(PUSH_FN, { cache: "no-store" })).json()).key || null; } catch (e) { VAPID = null; }
+  await alertsUI();
+}
+$("#al-me").addEventListener("click", e => { const b = e.target.closest("[data-me]"); if (!b) return; alMe = b.dataset.me || null; paintMe(); });
+$("#al-holes").addEventListener("click", e => { const b = e.target.closest("[data-h]"); if (!b) return; alHoles = b.dataset.h; paintMe(); });
+$("#alerts-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const note = $("#alerts-note"), btn = $("#al-save");
+  const p = { holes: alHoles }; for (const [k, id] of Object.entries(AL_IDS)) p[k] = $("#" + id).checked;
+  btn.disabled = true;
+  try {
+    const perm = await Notification.requestPermission(); // must run straight from the tap (iPhone rule)
+    if (perm !== "granted") { note.textContent = "Notifications weren't allowed. Turn them on in Settings, Notifications, Golf."; btn.disabled = false; return; }
+    note.textContent = "Saving…";
+    const sub = await SWREG.pushManager.getSubscription() || await SWREG.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64u(VAPID) });
+    const { error } = await sb.rpc("gt_push_sub", { op: "sub", sub: sub.toJSON(), prefs: p, me: alMe });
+    if (error) throw error;
+    const was = alState();
+    alSave({ on: true, p, me: alMe, synced: Date.now() });
+    fetch(PUSH_FN, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "welcome", endpoint: sub.endpoint }) }).catch(() => {});
+    note.textContent = was && was.on ? "Saved." : "You're in. A test alert should arrive in a few seconds.";
+  } catch (err) { note.textContent = "Couldn't turn alerts on right now. " + (/full|many/i.test(errMsg(err)) ? errMsg(err) + "." : "Try again in a bit."); }
+  btn.disabled = false; alertsUI();
+});
+$("#al-off").addEventListener("click", async () => {
+  const note = $("#alerts-note");
+  try {
+    const sub = await SWREG.pushManager.getSubscription();
+    if (sub) { await sb.rpc("gt_push_sub", { op: "unsub", sub: sub.toJSON() }); await sub.unsubscribe(); }
+    alSave({ on: false, p: alState()?.p, me: alMe });
+    note.textContent = "Alerts are off.";
+  } catch (e) { note.textContent = "Couldn't turn alerts off right now. Try again in a bit."; }
+  alertsUI();
+});
+// Refreshing inside the installed app (it has no reload button): pull down from the top, tap the
+// "Updated" line, or come back after 5+ minutes away (also picks up new versions of the site).
+(() => {
+  if (!inApp()) return;
+  document.documentElement.classList.add("app");
+  const ind = document.createElement("div"); ind.className = "ptr"; ind.setAttribute("aria-hidden", "true"); document.body.appendChild(ind);
+  const busy = () => !$("#modal").hidden;
+  const go = () => { ind.textContent = "Refreshing…"; ind.classList.add("on"); ind.style.transform = "translate(-50%,0)"; location.reload(); };
+  let y0 = null, d = 0;
+  addEventListener("touchstart", e => {
+    y0 = (scrollY <= 0 && e.touches.length === 1 && !busy() && !e.target.closest("canvas,svg,input,textarea,select,.tabs")) ? e.touches[0].clientY : null; d = 0;
+  }, { passive: true });
+  addEventListener("touchmove", e => {
+    if (y0 === null) return;
+    d = e.touches[0].clientY - y0;
+    if (d <= 10) { ind.classList.remove("on"); return; }
+    ind.classList.add("on");
+    ind.style.transform = `translate(-50%,${Math.min(d, 140) / 2 - 20}px)`;
+    ind.textContent = d > 90 ? "Let go to refresh" : "Pull to refresh";
+  }, { passive: true });
+  addEventListener("touchend", () => { if (y0 !== null && d > 90) go(); else ind.classList.remove("on"); y0 = null; d = 0; });
+  $("#upd").addEventListener("click", () => { if (!busy()) go(); });
+  let away = 0;
+  document.addEventListener("visibilitychange", () => { if (document.hidden) away = Date.now(); else if (away && Date.now() - away > 5 * 60000 && !busy()) location.reload(); });
+  if (state.updatedAt) stampUpd();
 })();

@@ -6,8 +6,12 @@
 <meta name="theme-color" content="#3e0f17">
 <script>try { var t = localStorage.getItem("golf_theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <title>Golf</title>
-<link rel="icon" type="image/png" href="favicon.png?v=202611232130">
-<link rel="stylesheet" href="style.css?v=202611232130">
+<link rel="icon" type="image/png" href="favicon.png?v=202611232230">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Golf"><meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="stylesheet" href="style.css?v=202611232230">
 </head>
 <body>
 <header>
@@ -19,17 +23,38 @@
 </header>
 <div id="demo" class="demo" hidden>Demo data. Connect the database in config.js to go live.</div>
 <main id="main"><div class="empty">Loading…</div></main>
+<section class="alertsbox" id="alerts" hidden>
+  <details id="alerts-d">
+    <summary><b>Alerts</b><span id="alerts-sum">Phone and watch</span></summary>
+    <div class="alerts-body">
+      <p class="hint" id="alerts-install" hidden>On iPhone: tap Share, then Add to Home Screen. Open Golf from the new icon and turn alerts on here. They show on your Apple Watch too.</p>
+      <form id="alerts-form" hidden>
+        <div class="altl">This phone is</div>
+        <div class="chips" id="al-me"></div>
+        <label class="chk"><input type="checkbox" id="al-start" checked><span>Round started<small>Course, tees and who's playing</small></span></label>
+        <div class="altl">Hole results</div>
+        <div class="chips" id="al-holes"><button type="button" data-h="off">Off</button><button type="button" data-h="big" class="on">Big moments</button><button type="button" data-h="all">Every hole</button></div>
+        <p class="hint" id="al-hhint"></p>
+        <label class="chk"><input type="checkbox" id="al-end" checked><span>Round finished<small>Result and money</small></span></label>
+        <p class="hint" id="al-mehint">This phone stays quiet for rounds you're playing in.</p>
+        <div class="acts"><button class="primary" type="submit" id="al-save">Turn on alerts</button><button type="button" id="al-off" hidden>Turn off</button></div>
+      </form>
+      <p class="hint" id="alerts-note"></p>
+    </div>
+  </details>
+</section>
 <button id="fab" class="fab ed" aria-label="Add round or match">+</button>
 <footer>
+  <button type="button" id="upd" class="upd">Updated</button>
   <div>by kingtrentz⚡️ x claude</div>
   <div>Handicaps are unofficial: they start at each player's starting handicap and move after every 18-hole round.</div>
   <div>Course data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> via <a href="https://opengolfapi.org/attribution">OpenGolfAPI</a> (ODbL).</div>
 </footer>
 <div id="modal" class="modal" hidden></div>
 <div id="toast" class="toast" hidden></div>
-<script src="config.js?v=202611232130"></script>
-<script src="demo.js?v=202611232130"></script>
-<script type="module" src="app.js?v=202611232130"></script>
+<script src="config.js?v=202611232230"></script>
+<script src="demo.js?v=202611232230"></script>
+<script type="module" src="app.js?v=202611232230"></script>
 <script data-goatcounter="https://kingtrentz.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
 </body>
 </html>

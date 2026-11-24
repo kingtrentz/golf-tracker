@@ -538,3 +538,26 @@ html[data-theme="light"] {
   --bg: #f6f2ea; --surface: #fffdf8; --surface-2: #f0eadf; --line: #e2d8c8;
   --head-top: #f2d9d9; --accent: #c9961c; --on-accent: #1a1206; --on-accent-2: #4a3608;
 } }
+/* Home Screen app: alerts box, Updated line, pull to refresh */
+main { padding-bottom: 14px; }
+.alertsbox { max-width: 820px; margin: 0 auto; padding: 0 12px; }
+.alertsbox[hidden], .alertsbox [hidden] { display: none; }
+.alertsbox details { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; }
+.alertsbox summary { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.alertsbox summary b { font-size: 15px; }
+.alertsbox summary span { color: var(--muted); font-size: 12.5px; }
+.alertsbox summary span::after { content: " ▸"; }
+.alertsbox details[open] summary span::after { content: " ▾"; }
+.alerts-body { margin-top: 10px; }
+.altl { font-size: 12.5px; color: var(--text-2); margin-bottom: 6px; }
+.alertsbox .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.alertsbox .chips button { padding: 7px 12px; font-size: 14px; border-radius: 99px; }
+.alertsbox .chips button.on { background: var(--gold-bg); border-color: var(--accent); color: var(--text); font-weight: 700; }
+.alertsbox label.chk { align-items: flex-start; }
+.alertsbox label.chk span { display: flex; flex-direction: column; font-weight: 600; min-width: 0; }
+.alertsbox label.chk small { font-weight: 400; font-size: 12.5px; color: var(--muted); }
+.alertsbox label.chk input { margin-top: 1px; flex: none; accent-color: var(--accent); }
+button.upd { background: none; border: 0; padding: 2px 6px; color: var(--muted); font-size: 12px; justify-self: center; cursor: default; }
+html.app button.upd { cursor: pointer; text-decoration: underline dotted; }
+.ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 6px); transform: translate(-50%, -60px); z-index: 70; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 12.5px; font-weight: 700; box-shadow: 0 4px 14px var(--shadow); opacity: 0; transition: opacity .15s; pointer-events: none; }
+.ptr.on { opacity: 1; }

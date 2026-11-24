@@ -728,7 +728,7 @@ body[data-tab="card"] .totop, body[data-tab="card"] .abyss { display: none !impo
 .abyss { position: relative; z-index: 2; max-width: 420px; margin: 0 auto; padding: 0 16px; text-align: center; }
 .abyss-hint { color: var(--muted); font-size: 12.5px; min-height: 0; opacity: 0; transition: opacity .25s ease, padding .25s ease; }
 .abyss-hint.show { opacity: .9; padding: 10px 0 22px; }
-.abyss-reveal { padding: 18px 0 96px; display: flex; flex-direction: column; align-items: center; gap: 14px; animation: abyssIn .45s cubic-bezier(.22,1,.36,1); }
+.abyss-reveal { padding: 120px 0 110px; display: flex; flex-direction: column; align-items: center; gap: 14px; animation: abyssIn .45s cubic-bezier(.22,1,.36,1); }
 .abyss-reveal[hidden] { display: none; }
 .abyss-reveal img { width: min(100%, 300px); height: auto; border-radius: 16px; border: 1px solid var(--line); box-shadow: 0 12px 32px var(--shadow); }
 .abyss-top { padding: 10px 18px; border-radius: 999px; }

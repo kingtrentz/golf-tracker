@@ -2039,8 +2039,8 @@ function startMatch(mt) {
     <div class="teepick">${tees.map(t => `<button type="button" class="teeopt ${t.id === pick.id ? "on" : ""}" data-tee="${t.id}"><b>${esc(t.tee_name || "Tees")}</b><span>${t.rating}/${t.slope}</span></button>`).join("")}</div>
     ${has18 ? `<div class="laylbl">Holes</div><div class="seg2"><button type="button" class="on" data-holes="18">18</button><button type="button" data-holes="9">Front 9</button></div>` : ""}
     <div id="smstrokes" class="hint"></div>
-    ${gameSelectHtml(initGame)}
     ${multi ? `<div class="laylbl">Bets</div>${betFields(mt.bets === undefined ? BET_DEFAULT : mt.bets, has18 ? 18 : 9)}` : ""}
+    ${gameSelectHtml(initGame)}
     <div class="acts"><button class="primary big" id="teeoff">Check scorecard ›</button></div>
     <p class="muted small">Not the right course? <button class="link" id="smfull">Change course or players</button></p></div>`, m => {
     let holes = has18 ? 18 : 9, game = initGame;
@@ -2099,8 +2099,8 @@ function cardForm(fromMatch) {
       <div class="row2"><label>Date<input type="date" name="played_on" value="${today()}" required></label>
       <label>Holes<select name="holes"><option>18</option><option>9</option></select></label></div>
       ${courseFields(v)}
-      ${gameSelectHtml(m0?.scoring === "gross" ? "stroke" : (m0?.scoring || "match"))}
       <div class="laylbl">Bets</div>${betFields(m0?.bets === undefined ? BET_DEFAULT : m0.bets, 18)}
+      ${gameSelectHtml(m0?.scoring === "gross" ? "stroke" : (m0?.scoring || "match"))}
       <div class="acts"><button class="primary" type="submit">Check scorecard ›</button></div>
     </form></div>`, m => {
     const f = $("#cf", m); wireCoursePicker(f);

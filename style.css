@@ -120,7 +120,7 @@ button, input, select { font: inherit; color: inherit; }
 
 header {
   position: sticky; top: 0; z-index: 10;
-  background: linear-gradient(180deg, var(--head-top) 0%, var(--bg) 100%);
+  background: linear-gradient(180deg, var(--head-top) 0%, var(--head-top) env(safe-area-inset-top, 0px), var(--bg) 100%);
   border-bottom: 1px solid var(--line);
   padding: max(10px, env(safe-area-inset-top)) 14px 0;
 }
@@ -708,3 +708,23 @@ html.app.glide :is(header, #demo, .alertsbox, main, footer) { transition: transf
 html.app:is(.settle, .glide) .ptr { transition: transform .45s cubic-bezier(.22,1,.36,1), opacity .28s ease; }
 @keyframes ptrSpin { 0% { transform: rotateY(0) } 100% { transform: rotateY(360deg) } }
 .ptr.spin img { animation: ptrSpin .75s linear infinite; }
+
+/* Floating Return to Top button + Deep-bottom scroll-resistance Easter egg */
+.totop {
+  position: fixed; left: 16px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 25;
+  padding: 9px 14px; border-radius: 999px; font-size: 13px; font-weight: 700;
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, var(--line));
+  color: var(--text); box-shadow: 0 6px 18px var(--shadow);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+}
+.totop[hidden] { display: none; }
+body[data-tab="card"] .totop, body[data-tab="card"] .abyss { display: none !important; }
+.abyss { position: relative; z-index: 2; max-width: 420px; margin: 0 auto; padding: 0 16px; text-align: center; }
+.abyss-hint { color: var(--muted); font-size: 12.5px; min-height: 0; opacity: 0; transition: opacity .25s ease, padding .25s ease; }
+.abyss-hint.show { opacity: .9; padding: 10px 0 22px; }
+.abyss-reveal { padding: 18px 0 96px; display: flex; flex-direction: column; align-items: center; gap: 14px; animation: abyssIn .45s cubic-bezier(.22,1,.36,1); }
+.abyss-reveal[hidden] { display: none; }
+.abyss-reveal img { width: min(100%, 300px); height: auto; border-radius: 16px; border: 1px solid var(--line); box-shadow: 0 12px 32px var(--shadow); }
+.abyss-top { padding: 10px 18px; border-radius: 999px; }
+@keyframes abyssIn { from { opacity: 0; transform: translateY(24px) scale(.95); } to { opacity: 1; transform: translateY(0) scale(1); } }

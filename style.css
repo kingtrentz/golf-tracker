@@ -537,14 +537,16 @@ body[data-tab="card"] main { padding-top: calc(env(safe-area-inset-top, 0px) + 1
 body[data-tab="card"] .live-top .headline { text-align: center; text-wrap: balance; font-size: clamp(15px, 4.1vw, 20px); line-height: 1.25; margin-top: 8px; }
 body[data-tab="card"] .step { min-width: 56px; height: 56px; font-size: 28px; }
 body[data-tab="card"] .val { min-width: 58px; height: 56px; font-size: 26px; }
-/* Deep-dark default palette + sunlight-friendly Light Mode */
+/* Clubhouse palette (Nov 24): dark = deep plum velvet with gold, light = khaki and old-club beige.
+   Previous: dark --bg #080707 --surface #110e0e --surface-2 #181414 --line #282121 --head-top #2b0910;
+   light --bg #f6f2ea --surface #fffdf8 --surface-2 #f0eadf --line #e2d8c8 --head-top #f2d9d9 --accent #c9961c */
 :root, html[data-theme="dark"] {
-  --bg: #080707; --surface: #110e0e; --surface-2: #181414; --line: #282121;
-  --head-top: #2b0910; --accent: #e2b53e; --on-accent: #1a1206; --on-accent-2: #4a3608;
+  --bg: #120a18; --surface: #1d1226; --surface-2: #281a32; --line: #3a2a46;
+  --head-top: #4b1d5c; --accent: #e2b53e; --on-accent: #1a1206; --on-accent-2: #4a3608;
 }
 html[data-theme="light"] {
-  --bg: #f6f2ea; --surface: #fffdf8; --surface-2: #f0eadf; --line: #e2d8c8;
-  --head-top: #f2d9d9; --accent: #c9961c; --on-accent: #1a1206; --on-accent-2: #4a3608;
+  --bg: #e6dcc6; --surface: #f6efdf; --surface-2: #ece2cb; --line: #d4c5a5;
+  --head-top: #cdbb8f; --accent: #9c7012; --on-accent: #fffaf0; --on-accent-2: #4a3608;
 }
 /* Home Screen app: alerts box, Updated line, pull to refresh */
 main { padding-bottom: 14px; }

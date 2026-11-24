@@ -2198,7 +2198,7 @@ document.addEventListener("click", e => {
     const t = themeNow();
     const tb = $("#themebtn");
     if (tb) { tb.textContent = t === "light" ? "☾" : "☀"; tb.title = t === "light" ? "Dark mode" : "Light mode"; }
-    document.querySelector('meta[name="theme-color"]').content = t === "light" ? "#f2d9d9" : "#2b0910";
+    document.querySelector('meta[name="theme-color"]').content = t === "light" ? "#cdbb8f" : "#4b1d5c";
   };
   if ($("#themebtn")) {
     $("#themebtn").onclick = () => {

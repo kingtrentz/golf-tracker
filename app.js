@@ -2674,7 +2674,7 @@ $("#al-off").addEventListener("click", async () => {
   const topBtn = $("#totop"), hint = $("#abyss-hint"), rev = $("#abyss-reveal"), abyssTop = $(".abyss-top");
   if (!topBtn || !hint || !rev) return;
   let charge = 0, opened = false, cool = 0, ty = null;
-  const GOAL = 320;
+  const GOAL = 450;
   const atBottom = () => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 16;
   const onCard = () => document.body.dataset.tab === "card";
   const paintTop = () => {

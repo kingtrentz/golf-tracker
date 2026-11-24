@@ -402,6 +402,17 @@ function renderTabs() {
   const el = $(".tabs"); if (el.innerHTML !== html) el.innerHTML = html;
 }
 function render() {
+  // A live card that was ended or deleted (often on another phone) can't be shown, and the
+  // full-screen Live view hides the header and + button, so fall back instead of stranding the page.
+  if (state.tab === "card" && !cardById(state.cardId)) {
+    if (state.cards.length) state.cardId = state.cards[0].id;
+    else {
+      state.tab = "h2h";
+      history.replaceState(null, "", "#h2h");
+      toast("That round isn't live anymore.");
+      startPolling();
+    }
+  }
   const tab = state.tab;
   if (!tab) return;
   renderTabs();
@@ -1629,8 +1640,12 @@ async function flushSaves() {
 // Pull the latest card from the server but keep anything this phone hasn't saved yet.
 async function pullCard(id) {
   if (DEMO) return;
-  const { data } = await sb.from("cards").select("*").eq("id", id).maybeSingle();
-  if (!data) return;
+  const { data, error } = await sb.from("cards").select("*").eq("id", id).maybeSingle();
+  if (error) return; // offline or a hiccup: keep what we have
+  if (!data || data.status !== "live") { // deleted or ended elsewhere
+    if (!pending[id]?.size) state.cards = state.cards.filter(c => c.id !== id);
+    return;
+  }
   const mine = pending[id] || new Set();
   const local = cardById(id);
   if (local) {

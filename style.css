@@ -694,8 +694,27 @@ header h1:has(.tw)::before { display: block; margin: 0 auto 3px; width: 40px; he
 .sc .sch { color: var(--muted); font-size: 10px; margin-left: 3px; font-weight: 600; }
 .sc .snet { display: block; color: var(--muted); font-size: 9.5px; font-weight: 600; white-space: nowrap; line-height: 1.1; }
 
-/* Caddy line under the hole number (replaces the hole map for now) */
-.hnote { margin: 2px 4px 10px; text-align: center; font-size: 13.5px; line-height: 1.35; color: var(--text-2); }
+/* Interactive Esri satellite hole map (inline drag-to-measure + optional expand modal) */
+.satwrap { position: relative; max-width: 100%; margin: 10px 0 6px; border-radius: 12px; overflow: hidden; border: 1px solid var(--line); background: #141a15; }
+.satwrap[hidden] { display: none; }
+.satcv { display: block; width: 100%; max-width: 100%; height: 118px; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.satbtn { position: absolute; width: 30px; height: 30px; padding: 0; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(21,12,23,.82); border: 1px solid color-mix(in srgb, var(--accent) 65%, var(--line)); color: #f5efe4; font-size: 14px; font-weight: 700; line-height: 1;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); z-index: 3; }
+.satbtn:active { transform: scale(.93); }
+.satexp { right: 7px; bottom: 7px; }
+.satclr { left: 7px; top: 7px; font-size: 12px; }
+.satclr[hidden] { display: none; }
+.sathint { position: absolute; left: 8px; bottom: 7px; pointer-events: none; font-size: 10.5px; font-weight: 600; color: rgba(245,239,228,.82);
+  background: rgba(21,12,23,.62); padding: 2px 7px; border-radius: 999px; z-index: 2; }
+.sathint[hidden] { display: none; }
+.sat-sheet { padding: 14px 14px 18px; }
+.sat-sheet h2 { margin: 0 0 2px; font-size: 17px; padding-right: 28px; }
+.sat-fullbox { position: relative; border-radius: 14px; overflow: hidden; border: 1px solid var(--line); background: #141a15; }
+.sat-fullcv { display: block; width: 100%; height: min(64vh, 490px); touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+.sat-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; font-size: 11.5px; color: var(--muted); }
+/* Caddy line under the satellite map */
+.hnote { margin: 2px 4px 10px; text-align: center; font-size: 13px; line-height: 1.35; color: var(--text-2); }
 .hnote:empty { display: none; }
 
 /* Theme switch: root background follows the theme; .bg-wash paints seamlessly behind the iPhone status bar on the exact same frame. */

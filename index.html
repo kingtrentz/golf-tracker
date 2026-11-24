@@ -11,7 +11,7 @@
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Golf"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<link rel="stylesheet" href="style.css?v=202611240645">
+<link rel="stylesheet" href="style.css?v=202611240655">
 </head>
 <body>
 <div class="topbar" aria-hidden="true"></div>
@@ -63,11 +63,19 @@
   <div>Handicaps are unofficial: they start at each player's starting handicap and move after every 18-hole round.</div>
   <div>Course data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> via <a href="https://opengolfapi.org/attribution">OpenGolfAPI</a> (ODbL).</div>
 </footer>
+<div id="abyss" class="abyss" aria-hidden="true">
+  <div id="abyss-hint" class="abyss-hint"></div>
+  <div id="abyss-reveal" class="abyss-reveal" hidden>
+    <img src="scrolled-too-far.webp?v=202611240655" alt="I Think I Scrolled Too Far — STOP SCROLLING!" loading="lazy">
+    <button type="button" class="primary abyss-top">↑ Return to top</button>
+  </div>
+</div>
+<button id="totop" class="totop" type="button" aria-label="Return to top" hidden>↑ Top</button>
 <div id="modal" class="modal" hidden></div>
 <div id="toast" class="toast" hidden></div>
 <script src="config.js?v=202611240410"></script>
 <script src="demo.js?v=202611240050"></script>
-<script type="module" src="app.js?v=202611240645"></script>
+<script type="module" src="app.js?v=202611240655"></script>
 <script data-goatcounter="https://kingtrentz.goatcounter.com/count" async src="https://gc.zgo.at/count.js"></script>
 </body>
 </html>

@@ -2157,6 +2157,16 @@ document.addEventListener("change", e => {
   }
 });
 
+// Tapping the turtle shell above the title does a full fresh reload (drops the offline copy first).
+// Deliberately unlabeled: no cursor, no hint, nothing on screen.
+document.addEventListener("click", e => {
+  const h = e.target.closest && e.target.closest("header h1#title");
+  if (!h || !h.querySelector(".tw")) return;
+  const tw = h.querySelector(".tw").getBoundingClientRect();
+  if (e.clientY >= tw.top) return; // only the shell, which sits above "THE"
+  (window.caches ? caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))) : Promise.resolve())
+    .catch(() => {}).then(() => location.reload());
+});
 (async function init() {
   document.title = CFG.siteTitle;
   // "The" sits small and centered above the name

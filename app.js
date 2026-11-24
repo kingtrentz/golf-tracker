@@ -2203,6 +2203,8 @@ document.addEventListener("click", e => {
   if ($("#themebtn")) {
     $("#themebtn").onclick = () => {
       const next = themeNow() === "light" ? "dark" : "light";
+      // status bar color first, then the page, in the same frame
+      document.querySelector('meta[name="theme-color"]').content = next === "light" ? "#cdbb8f" : "#4b1d5c";
       document.documentElement.dataset.theme = next;
       try { localStorage.setItem("golf_theme", next); } catch (e) { /* private mode */ }
       paintTheme();
@@ -2589,34 +2591,51 @@ $("#al-off").addEventListener("click", async () => {
 (() => {
   if (!inApp()) return;
   document.documentElement.classList.add("app");
-  const ind = document.createElement("div"); ind.className = "ptr"; ind.setAttribute("aria-hidden", "true"); document.body.appendChild(ind);
+  // Pull down from the top: the page slides down over the locked crest watermark, the crest rises into the
+  // gap above it, and on release everything flings back up with a bounce (and refreshes past the line).
+  const ind = document.createElement("div"); ind.className = "ptr"; ind.setAttribute("aria-hidden", "true");
+  ind.innerHTML = `<img src="crest.webp?v=202611232130" alt=""><span>Pull to refresh</span>`;
+  const band = document.createElement("div"); band.className = "ptrbg"; band.setAttribute("aria-hidden", "true");
+  document.body.append(band, ind);
+  const lbl = ind.querySelector("span"), root = document.documentElement;
   const busy = () => !$("#modal").hidden;
-  const go = () => { ind.textContent = "Refreshing…"; ind.classList.add("rel", "go"); ind.style.opacity = "1"; ind.style.transform = "translate3d(-50%,14px,0)"; setTimeout(() => location.reload(), 450); };
-  // Follows the finger on the GPU, one style write per frame, text changes only at the threshold,
-  // springs back with a short ease on release.
+  const LINE = 90;
+  const setPull = (p, mode) => {
+    root.classList.toggle("settle", !!mode); root.style.setProperty("--pull", p.toFixed(1) + "px");
+    const k = Math.min(1, p / 70);
+    ind.style.opacity = k.toFixed(2);
+    ind.style.transform = `translate3d(-50%,${(p / 2 - 34).toFixed(1)}px,0) scale(${(0.7 + 0.3 * k).toFixed(3)})`;
+  };
+  const go = () => {
+    lbl.textContent = "Refreshing…"; ind.classList.add("spin");
+    setPull(80, true);
+    setTimeout(() => { setPull(0, true); setTimeout(() => location.reload(), 380); }, 420);
+  };
   let y0 = null, d = 0, raf = 0, armed = null;
   const paint = () => {
     raf = 0;
     if (y0 === null) return;
-    const pull = Math.max(0, d - 10), y = 90 * (1 - Math.exp(-pull / 80)) - 40;
-    ind.style.transform = `translate3d(-50%,${y.toFixed(1)}px,0)`;
-    ind.style.opacity = Math.min(1, pull / 40).toFixed(2);
-    const a = d > 90;
-    if (a !== armed) { armed = a; ind.textContent = a ? "Let go to refresh" : "Pull to refresh"; }
+    const pull = Math.max(0, d - 6);
+    setPull(130 * (1 - Math.exp(-pull / 120)), false);
+    const a = d > LINE;
+    if (a !== armed) { armed = a; lbl.textContent = a ? "Let go to refresh" : "Pull to refresh"; }
   };
   addEventListener("touchstart", e => {
-    y0 = (scrollY <= 0 && e.touches.length === 1 && !busy() && !e.target.closest("canvas,svg,input,textarea,select,.tabs")) ? e.touches[0].clientY : null; d = 0; armed = null;
-    if (y0 !== null) ind.classList.remove("rel");
+    y0 = (scrollY <= 0 && e.touches.length === 1 && !busy() && !e.target.closest("canvas,input,textarea,select,.tabs,.lpic")) ? e.touches[0].clientY : null; d = 0; armed = null;
   }, { passive: true });
   addEventListener("touchmove", e => {
     if (y0 === null) return;
     d = e.touches[0].clientY - y0;
+    if (d < 0) { y0 = null; setPull(0, true); return; } // scrolling up: let the page scroll
     if (!raf) raf = requestAnimationFrame(paint);
   }, { passive: true });
-  addEventListener("touchend", () => {
-    if (y0 !== null && d > 90) { y0 = null; go(); return; }
-    y0 = null; d = 0; ind.classList.add("rel"); ind.style.transform = "translate3d(-50%,-60px,0)"; ind.style.opacity = "0";
-  }, { passive: true });
+  const release = () => {
+    if (y0 === null) return;
+    const fire = d > LINE; y0 = null; d = 0;
+    if (fire) go(); else setPull(0, true);
+  };
+  addEventListener("touchend", release, { passive: true });
+  addEventListener("touchcancel", release, { passive: true });
   $("#upd").addEventListener("click", () => { if (!busy()) go(); });
   let away = 0;
   document.addEventListener("visibilitychange", () => { if (document.hidden) away = Date.now(); else if (away && Date.now() - away > 5 * 60000 && !busy()) location.reload(); });

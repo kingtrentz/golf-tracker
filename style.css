@@ -569,12 +569,7 @@ main { padding-bottom: 14px; }
 .alertsbox label.chk input { margin-top: 1px; flex: none; accent-color: var(--accent); }
 button.upd { background: none; border: 0; padding: 2px 6px; color: var(--muted); font-size: 12px; justify-self: center; cursor: default; }
 html.app button.upd { cursor: pointer; text-decoration: underline dotted; }
-.ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 6px); transform: translate(-50%, -60px); z-index: 70; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 12.5px; font-weight: 700; box-shadow: 0 4px 14px var(--shadow); opacity: 0; transition: opacity .15s; pointer-events: none; }
-.ptr { will-change: transform, opacity; transition: none; }
-.ptr.rel { transition: transform .45s cubic-bezier(.34,1.56,.64,1), opacity .25s ease; }
-/* Refreshing: the pill settles with a little bounce */
-@keyframes ptrBounce { 0% { transform: translate3d(-50%,14px,0) } 35% { transform: translate3d(-50%,4px,0) } 60% { transform: translate3d(-50%,16px,0) } 80% { transform: translate3d(-50%,11px,0) } 100% { transform: translate3d(-50%,14px,0) } }
-.ptr.go { animation: ptrBounce .6s ease-out both; }
+
 /* One-tap on-demand GPS yardages button on the hole screen */
 button.yds { display: inline-flex; align-items: baseline; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--surface-2) 85%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 999px; padding: 6px 14px; margin-top: 6px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; cursor: pointer; }
 button.yds:active { transform: scale(.97); }
@@ -680,4 +675,21 @@ header h1:has(.tw)::before { display: block; margin: 0 auto 3px; width: 40px; he
 html { background: var(--bg); }
 /* The iPhone status bar icons are white over the page now; in light mode a slim dark-khaki band sits under
    them so they stay readable (zero height in the browser, where there's no inset). */
-html[data-theme="light"] body::after { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: #6b5a36; z-index: 80; pointer-events: none; }
+html[data-theme="light"] body::after { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: color-mix(in srgb, var(--head-top) 55%, #3a2c14); z-index: 80; pointer-events: none; }
+/* App pull to refresh: content slides with the finger, the crest watermark (body::before) stays locked,
+   the page background shows in the gap so colors stay the same, and release flings back with a bounce. */
+html.app { overscroll-behavior-y: none; }
+html.app body { overscroll-behavior-y: none; }
+html.app :is(header, #demo, .alertsbox, main, footer) { transform: translate3d(0, var(--pull, 0px), 0); will-change: transform; }
+html.app.settle :is(header, #demo, .alertsbox, main, footer) { transition: transform .55s cubic-bezier(.34,1.56,.64,1); }
+.ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 6px); z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 4px;
+  opacity: 0; transform: translate3d(-50%, -34px, 0) scale(.7); pointer-events: none; will-change: transform, opacity; color: var(--text-2); font-size: 11.5px; font-weight: 700; letter-spacing: .02em; }
+.ptr img { width: 40px; height: auto; filter: drop-shadow(0 3px 8px #0006); }
+html.app.settle .ptr { transition: transform .55s cubic-bezier(.34,1.56,.64,1), opacity .35s ease; }
+@keyframes ptrSpin { 0% { transform: rotateY(0) } 100% { transform: rotateY(360deg) } }
+.ptr.spin img { animation: ptrSpin .8s ease-in-out infinite; }
+/* The gap the pull opens above the header is filled with the header's own color, so the top stays one color. */
+.ptrbg { position: fixed; top: 0; left: 0; right: 0; height: calc(var(--pull, 0px) + env(safe-area-inset-top, 0px) + 2px); background: var(--head-top); z-index: 1; pointer-events: none; }
+html.app.settle .ptrbg { transition: height .55s cubic-bezier(.34,1.56,.64,1); }
+.ptr { z-index: 2; }
+html:not(.app) .ptrbg { display: none; }

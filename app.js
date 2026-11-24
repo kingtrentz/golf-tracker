@@ -604,9 +604,8 @@ function photoForm(matchId) {
     <form id="phf">
       <label class="pickbtn">Choose photos<input type="file" name="files" accept="image/*" multiple></label>
       <div id="phprev" class="phprev"></div>
-      <label>Caption<input name="caption" maxlength="200" placeholder="Optional"></label>
-      <label>Round<select name="match"><option value="">None</option>${recent.map(m => `<option value="${m.id}" ${m.id === matchId ? "selected" : ""}>${fmtShort(m.scheduled_for)} · ${esc(splitName(m.course_name || "").base || "round")}</option>`).join("")}</select></label>
       ${photoCourseField(matchId ? state.matches.find(x => x.id === matchId)?.course_name : "")}
+      <label>Round (optional)<select name="match"><option value="">None</option>${recent.map(m => `<option value="${m.id}" ${m.id === matchId ? "selected" : ""}>${fmtShort(m.scheduled_for)} · ${esc(splitName(m.course_name || "").base || "round")}</option>`).join("")}</select></label>
       <p class="hint">Up to 20 at a time. Photos are shrunk before upload, so it's quick on data.</p>
       <div class="acts"><button class="primary" type="submit" disabled>Upload</button></div>
     </form>`, m => {
@@ -621,7 +620,7 @@ function photoForm(matchId) {
       e.preventDefault();
       const list = [...f.files.files].slice(0, 20); if (!list.length) return;
       btn.disabled = true;
-      const match_id = f.match.value || null, caption = f.caption.value.trim() || null, course_name = f.course.value.trim() || null;
+      const match_id = f.match.value || null, course_name = f.course.value.trim() || null;
       const mt = state.matches.find(x => x.id === match_id);
       let done = 0;
       try {
@@ -639,7 +638,7 @@ function photoForm(matchId) {
             if (b.error) throw b.error;
             row = { path: s.path, thumb: s.thumb };
           }
-          await save("photos", { ...row, caption, match_id, course_name, taken_on: mt ? mt.scheduled_for : fileDay(list[i]), width: full.w, height: full.h });
+          await save("photos", { ...row, match_id, course_name, taken_on: mt ? mt.scheduled_for : fileDay(list[i]), width: full.w, height: full.h });
           done++;
         }
         closeModal(); await loadPhotos(); if (state.tab === "gallery") render(); else location.hash = "gallery";
@@ -665,28 +664,73 @@ function viewGallery() {
     <p class="hint ed">Anyone with the family phrase can add photos.</p>
   </section>`;
 }
-// Course on a photo: typed or picked from saved courses; picking a round fills it in.
-const courseNames = () => [...new Set(state.courses.map(c => c.name))].sort();
+// Course on a photo: tap a saved course, search any course (saved + OpenGolfAPI + OpenStreetMap), or "Near me".
+const courseNames = () => {
+  const n = {}; state.rounds.forEach(r => { if (r.course_name) n[r.course_name] = (n[r.course_name] || 0) + 1; });
+  return [...new Set(state.courses.map(c => c.name))].sort((a, b) => (n[b] || 0) - (n[a] || 0) || a.localeCompare(b));
+};
+const courseLabel = n => { const s = splitName(n); return s.layout ? `${s.layout} · ${s.base}` : s.base; };
 const photoCourse = p => p.course_name || (p.match_id && state.matches.find(m => m.id === p.match_id)?.course_name) || "";
 function photoCourseField(v) {
-  return `<label>Course<input name="course" list="phcourses" maxlength="120" placeholder="Optional" value="${esc(v || "")}"></label>
-    <datalist id="phcourses">${courseNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist>`;
+  return `<div class="pcpick"><div class="altl">Course</div><input type="hidden" name="course" value="${esc(v || "")}">
+    <div class="pcsel"></div>
+    <div class="chips pcchips">${courseNames().slice(0, 8).map(n => `<button type="button" data-pc="${esc(n)}">${esc(courseLabel(n))}</button>`).join("")}<button type="button" class="pcnear">📍 Near me</button></div>
+    <input class="pcsearch" type="search" placeholder="Search any course" autocomplete="off" autocapitalize="words" spellcheck="false">
+    <div class="pcres"></div></div>`;
 }
 function wirePhotoCourse(f) {
-  let typed = !!f.course.value;
-  f.course.oninput = () => { typed = !!f.course.value; };
-  f.match.onchange = () => { const mt = state.matches.find(x => x.id === f.match.value); if (mt?.course_name && !typed) f.course.value = mt.course_name; };
+  const box = $(".pcpick", f), hid = f.course, res = $(".pcres", box), q = $(".pcsearch", box);
+  let manual = !!hid.value, timer = null, seq = 0;
+  const paint = () => {
+    $(".pcsel", box).innerHTML = hid.value ? `<span class="pcchip">⛳ ${esc(courseLabel(hid.value))}<button type="button" class="pcx" aria-label="Clear course">✕</button></span>` : `<span class="muted small">No course yet. Pick one below.</span>`;
+    box.querySelectorAll("[data-pc]").forEach(b => b.classList.toggle("on", b.dataset.pc === hid.value));
+    const x = $(".pcx", box); if (x) x.onclick = () => { hid.value = ""; manual = true; paint(); };
+  };
+  const pick = name => { hid.value = name; manual = true; res.innerHTML = ""; q.value = ""; paint(); };
+  const rows = (list, note) => {
+    res.innerHTML = list.length ? list.map(c => `<button type="button" class="pcrow" data-name="${esc(c.name)}"><b>${esc(c.label || c.name)}</b><span>${esc([c.city, c.state].filter(Boolean).join(", "))}${c.mi != null ? `${c.city || c.state ? " · " : ""}${c.mi.toFixed(1)} mi` : ""}${c.saved ? `${c.city || c.state || c.mi != null ? " · " : ""}saved` : ""}</span></button>`).join("") : `<div class="muted small pcnote">${esc(note || "No courses found.")}</div>`;
+    res.querySelectorAll(".pcrow").forEach(b => b.onclick = () => pick(b.dataset.name));
+  };
+  box.querySelectorAll("[data-pc]").forEach(b => b.onclick = () => pick(b.dataset.pc));
+  q.oninput = () => {
+    clearTimeout(timer); const term = q.value.trim(), my = ++seq;
+    if (term.length < 2) { res.innerHTML = ""; return; }
+    const local = courseNames().filter(n => n.toLowerCase().includes(term.toLowerCase())).map(n => ({ name: n, label: courseLabel(n), saved: true }));
+    rows(local, "Searching…");
+    if (local.length) res.insertAdjacentHTML("beforeend", `<div class="muted small pcnote">Searching for more…</div>`);
+    timer = setTimeout(async () => {
+      const [og, nm] = await Promise.allSettled([ogByName(term), timed(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&addressdetails=1&q=${encodeURIComponent(term + " golf")}`, {}, 8000).then(r => r.json())]);
+      if (my !== seq) return;
+      const more = [...(og.value || []).map(c => ({ name: c.name, city: c.city, state: c.state })),
+        ...((nm.value || []).filter(e => e.type === "golf_course" && e.name).map(e => ({ name: e.name, city: e.address?.city || e.address?.town || e.address?.village || "", state: e.address?.state || "" })))];
+      const seen = new Set(local.map(c => c.name.toLowerCase()));
+      rows([...local, ...more.filter(c => !seen.has(c.name.toLowerCase()) && seen.add(c.name.toLowerCase()))].slice(0, 12));
+    }, 350);
+  };
+  $(".pcnear", box).onclick = async () => {
+    const my = ++seq; rows([], "Finding courses near you…");
+    try {
+      const loc = await myLocation();
+      const saved = state.courses.filter(c => c.lat != null).map(c => ({ name: c.name, label: courseLabel(c.name), saved: true, mi: miles(loc.lat, loc.lng, c.lat, c.lng) })).filter(c => c.mi < 30);
+      const near = await nominatimNear(loc);
+      if (my !== seq) return;
+      const seen = new Set(), all = [...saved, ...near].filter(c => c.mi < 30 && !seen.has(c.name.toLowerCase()) && seen.add(c.name.toLowerCase())).sort((a, b) => a.mi - b.mi).slice(0, 12);
+      rows(all, "No courses found near you.");
+    } catch (err) { rows([], errMsg(err)); }
+  };
+  if (f.match) f.match.addEventListener("change", () => { const mt = state.matches.find(x => x.id === f.match.value); if (mt?.course_name && !manual) { hid.value = mt.course_name; paint(); } });
+  paint();
 }
 function photoView(id) {
   const ph = state.photos || [], i = ph.findIndex(p => p.id === id); if (i < 0) return;
   const p = ph[i], where = photoCourse(p);
   const newer = ph[i - 1]?.id, older = ph[i + 1]?.id;
   openModal(`<div class="lbox">
-    <div class="lpic"><img src="${esc(photoUrl(p.path))}" alt="${esc(p.caption || "")}" draggable="false"><span class="lcount">${i + 1} / ${ph.length}</span></div>
+    <div class="lpic"><img src="${esc(photoUrl(p.path))}" alt="${esc(p.caption || where || "")}" draggable="false"><span class="lcount">${i + 1} / ${ph.length}</span></div>
+    <div class="lwhere">${where ? `<span class="lcourse">⛳ ${esc(courseLabel(where))}</span>` : `<button class="lcourse add" id="phaddc">⛳ Add the course</button>`}<span class="ldate">${fmtDate(p.taken_on)}</span></div>
     ${p.caption ? `<div class="lcap">${esc(p.caption)}</div>` : ""}
-    <div class="muted small">${fmtDate(p.taken_on)}${where ? ` · ${esc(where)}` : ""}</div>
     <div class="acts">${newer ? `<button data-pv="${newer}">‹ Newer</button>` : ""}${older ? `<button data-pv="${older}">Older ›</button>` : ""}
-      <button class="link ed" id="phedit">Edit</button><button class="link ed" id="phdel">Delete</button></div>
+      <button id="phedit">Edit</button><button class="link" id="phdel">Delete</button></div>
     <p class="hint lswipe">Swipe for the next one.</p></div>`, m => {
     m.querySelectorAll("[data-pv]").forEach(b => b.onclick = () => photoView(b.dataset.pv));
     // Swipe left = older, right = newer (ignores mostly-vertical moves so the sheet still scrolls)
@@ -699,6 +743,7 @@ function photoView(id) {
     });
     m.onkeydown = e => { if (e.key === "ArrowLeft" && newer) photoView(newer); if (e.key === "ArrowRight" && older) photoView(older); };
     $("#phedit", m).onclick = () => photoEdit(id);
+    const addc = $("#phaddc", m); if (addc) addc.onclick = () => photoEdit(id);
     $("#phdel", m).onclick = async () => {
       if (!editing()) return phraseForm(() => photoView(id));
       if (!confirm("Delete this photo for everyone?")) return;
@@ -707,18 +752,17 @@ function photoView(id) {
     };
   });
 }
-// Edit caption, course and round on a photo already in the gallery. "Save & next" walks to the next older photo.
+// Edit course and round on a photo already in the gallery. "Save & next" walks to the next older photo.
 function photoEdit(id) {
   if (!editing()) return phraseForm(() => photoEdit(id));
   const ph = state.photos || [], i = ph.findIndex(p => p.id === id); if (i < 0) return;
   const p = ph[i], older = ph[i + 1]?.id;
   const rounds = state.matches.filter(m => daysBetween(m.scheduled_for, today()) >= 0).sort(byDate).reverse().slice(0, 30);
-  openModal(`<h2>Edit photo</h2>
+  openModal(`<h2>Where was this?</h2>
     <form id="pef">
       <img class="peimg" src="${esc(photoUrl(p.thumb || p.path))}" alt="">
-      <label>Caption<input name="caption" maxlength="200" placeholder="Optional" value="${esc(p.caption || "")}"></label>
-      <label>Round<select name="match"><option value="">None</option>${rounds.map(m => `<option value="${m.id}" ${m.id === p.match_id ? "selected" : ""}>${fmtShort(m.scheduled_for)} · ${esc(splitName(m.course_name || "").base || "round")}</option>`).join("")}</select></label>
       ${photoCourseField(p.course_name || "")}
+      <label>Round (optional)<select name="match"><option value="">None</option>${rounds.map(m => `<option value="${m.id}" ${m.id === p.match_id ? "selected" : ""}>${fmtShort(m.scheduled_for)} · ${esc(splitName(m.course_name || "").base || "round")}</option>`).join("")}</select></label>
       <p class="hint">${fmtDate(p.taken_on)} · ${i + 1} of ${ph.length}</p>
       <div class="acts"><button class="primary" type="submit">Save</button>${older ? `<button type="button" id="penext">Save & next ›</button>` : ""}<button type="button" data-back>Back</button></div>
     </form>`, m => {
@@ -726,7 +770,7 @@ function photoEdit(id) {
     m.querySelector("[data-back]").onclick = () => photoView(id);
     const go = async next => {
       const mt = state.matches.find(x => x.id === f.match.value);
-      const row = { caption: f.caption.value.trim() || null, course_name: f.course.value.trim() || null, match_id: f.match.value || null };
+      const row = { course_name: f.course.value.trim() || null, match_id: f.match.value || null };
       if (mt && mt.id !== p.match_id) row.taken_on = mt.scheduled_for;
       m.querySelectorAll("button").forEach(b => b.disabled = true);
       try {

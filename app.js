@@ -392,6 +392,7 @@ function render() {
   const tab = state.tab;
   if (!tab) return;
   renderTabs();
+  document.body.dataset.tab = tab; // style.css hides the crest on the Live and Gallery tabs
   document.querySelectorAll(".tabs a").forEach(a => a.classList.toggle("on", a.dataset.tab === tab));
   const main = $("#main");
   main.innerHTML = tab === "card" ? viewCard(state.cardId) : tab === "gallery" ? viewGallery() : liveStrip() + (tab === "h2h" ? viewH2H() : viewPlayer(tab));
@@ -1995,7 +1996,7 @@ document.addEventListener("change", e => {
     const t = themeNow();
     $("#themebtn").textContent = t === "light" ? "☾" : "☀";
     $("#themebtn").title = t === "light" ? "Dark mode" : "Light mode";
-    document.querySelector('meta[name="theme-color"]').content = t === "light" ? "#e2f0e6" : "#121412";
+    document.querySelector('meta[name="theme-color"]').content = t === "light" ? "#f2d9d9" : "#3e0f17";
   };
   $("#themebtn").onclick = () => {
     const next = themeNow() === "light" ? "dark" : "light";

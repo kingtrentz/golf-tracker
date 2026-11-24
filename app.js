@@ -651,17 +651,25 @@ function photoForm(matchId) {
     };
   });
 }
+// Short course name for labels: the course inside a club, or the club without "Golf Course" etc.
+const courseTag = n => { const s = splitName(n || ""); return s.layout || s.base.replace(/\s+(golf\s+(course|club|links)|country club|golf)$/i, "").trim() || s.base; };
 function viewGallery() {
-  const ph = state.photos || [];
+  const all = state.photos || [];
+  // Course chips: every course with photos, most photos first; tap one to see just those.
+  const counts = {}; all.forEach(p => { const c = photoCourse(p); if (c) counts[c] = (counts[c] || 0) + 1; });
+  const tags = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
+  if (viewGallery.course && !counts[viewGallery.course]) viewGallery.course = null;
+  const ph = viewGallery.course ? all.filter(p => photoCourse(p) === viewGallery.course) : all;
   const months = {};
   for (const p of ph) (months[p.taken_on.slice(0, 7)] ||= []).push(p);
   const mName = k => parseDate(k + "-01").toLocaleDateString("en-US", { month: "long", year: "numeric" });
   return `<section class="card gallery">
     <div class="ghead"><h3>Gallery</h3><button class="primary ed" data-act="add-photo">+ Add photos</button></div>
+    ${tags.length ? `<div class="gcourses"><button class="${viewGallery.course ? "" : "on"}" data-act="gcourse" data-v="">All <span>${all.length}</span></button>${tags.map(t => `<button class="${viewGallery.course === t ? "on" : ""}" data-act="gcourse" data-v="${esc(t)}">⛳ ${esc(courseTag(t))} <span>${counts[t]}</span></button>`).join("")}</div>` : ""}
     ${ph.length ? Object.entries(months).map(([k, list]) => `<div class="gmonth">${mName(k)}</div>
-      <div class="ggrid">${list.map(p => `<button class="gph" data-act="photo" data-id="${p.id}" aria-label="${esc(p.caption || "Photo")}"><img src="${esc(photoUrl(p.thumb || p.path))}" loading="lazy" alt="${esc(p.caption || "")}"></button>`).join("")}</div>`).join("")
+      <div class="ggrid">${list.map(p => { const c = photoCourse(p); return `<button class="gph" data-act="photo" data-id="${p.id}" aria-label="${esc(c ? courseTag(c) : "Photo")}"><img src="${esc(photoUrl(p.thumb || p.path))}" loading="lazy" alt="">${c ? `<span class="gtag">${esc(courseTag(c))}</span>` : ""}</button>`; }).join("")}</div>`).join("")
       : `<div class="empty">No photos yet.</div>`}
-    <p class="hint ed">Anyone with the family phrase can add photos.</p>
+    <p class="hint ed">Anyone with the family phrase can add photos. Tap a photo, then Add the course, to tag where it was.</p>
   </section>`;
 }
 // Course on a photo: tap a saved course, search any course (saved + OpenGolfAPI + OpenStreetMap), or "Near me".
@@ -721,8 +729,8 @@ function wirePhotoCourse(f) {
   if (f.match) f.match.addEventListener("change", () => { const mt = state.matches.find(x => x.id === f.match.value); if (mt?.course_name && !manual) { hid.value = mt.course_name; paint(); } });
   paint();
 }
-function photoView(id) {
-  const ph = state.photos || [], i = ph.findIndex(p => p.id === id); if (i < 0) return;
+function photoView(id, only = viewGallery.course) {
+  const ph = (state.photos || []).filter(p => !only || photoCourse(p) === only), i = ph.findIndex(p => p.id === id); if (i < 0) return photoView(id, null);
   const p = ph[i], where = photoCourse(p);
   const newer = ph[i - 1]?.id, older = ph[i + 1]?.id;
   openModal(`<div class="lbox">
@@ -2076,7 +2084,8 @@ document.addEventListener("click", e => {
   if (act === "cardsc") cardScorecard(id);
   if (act === "bets") betsForm(id);
   if (act === "add-photo") photoForm();
-  if (act === "photo") photoView(id);
+  if (act === "photo") photoView(id, viewGallery.course);
+  if (act === "gcourse") { viewGallery.course = b.dataset.v || null; render(); }
   if (act === "press") pressForm(id);
   if (act === "unpress") unpress(id, Number(b.dataset.v));
   if (act === "money") moneyForm(state.matches.find(m => m.id === id));

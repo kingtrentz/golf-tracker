@@ -293,8 +293,19 @@ const editing = () => !!state.phrase;
 function lock(wrong) {
   state.phrase = null;
   localStorage.removeItem("golf_phrase");
+  document.documentElement.classList.add("locked");
+  $("#gmsg").textContent = wrong ? "The phrase changed. Enter the new one." : "";
   render();
-  if (wrong) toast("Security phrase changed or wrong. Enter it again.");
+}
+// The whole site sits behind the family phrase (checked by the database). Once in, this phone can view and score.
+async function unlock(p) {
+  let ok = true;
+  if (!DEMO) { const r = await sb.rpc("gt_check", { p }); if (r.error) throw r.error; ok = r.data; }
+  if (!ok) return false;
+  state.phrase = p; localStorage.setItem("golf_phrase", p);
+  document.documentElement.classList.remove("locked");
+  render();
+  return true;
 }
 function phraseForm(then) {
   openModal(`<h2>Enter scores</h2><p class="hint">Type the family security phrase. This phone remembers it until you lock it.</p>
@@ -399,7 +410,6 @@ function render() {
   const main = $("#main");
   main.innerHTML = tab === "card" ? viewCard(state.cardId) : tab === "gallery" ? viewGallery() : liveStrip() + (tab === "h2h" ? viewH2H() : viewPlayer(tab));
   wireCharts(main);
-  $("#authbtn").textContent = editing() ? "Lock" : "Enter scores";
   document.body.classList.toggle("editing", editing());
   document.body.classList.toggle("oncard", tab === "card");
   ydSync();
@@ -1985,15 +1995,22 @@ document.addEventListener("change", e => {
   $("#title").textContent = CFG.siteTitle;
   $("#tagline").textContent = CFG.tagline || "";
   renderTabs();
+  $("#lockbtn").onclick = () => { if (confirm("Lock this phone? You'll need the family phrase to get back in.")) lock(); };
+  $("#gf").onsubmit = async e => {
+    e.preventDefault();
+    const f = e.target, p = f.p.value.trim(), btn = f.querySelector("button"), msg = $("#gmsg");
+    if (!p) return;
+    btn.disabled = true; msg.textContent = "";
+    for (let i = 0; i < 40 && !DEMO && !sb; i++) await new Promise(r => setTimeout(r, 100)); // database client still loading
+    try { if (!(await unlock(p))) { msg.textContent = "That's not it."; f.p.select(); } else f.p.value = ""; }
+    catch (err) { msg.textContent = /too many|locked/i.test(errMsg(err)) ? errMsg(err) : "Couldn't check right now. Try again."; }
+    btn.disabled = false;
+  };
   if (DEMO) $("#demo").hidden = false;
   else {
     const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
     sb = createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
   }
-  $("#authbtn").onclick = () => {
-    if (editing()) { lock(); toast("Locked on this phone."); }
-    else phraseForm();
-  };
   $("#fab").onclick = addMenu;
   // Light / dark: follows the phone until you tap the toggle, then remembers your pick.
   const sysLight = matchMedia("(prefers-color-scheme: light)");

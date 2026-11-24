@@ -11,7 +11,7 @@ window.GOLF_CONFIG = {
   defaultCourses: { "Hermitage Golf Course": "General's Retreat" },
   players: [
     { slug: "trent", name: "Trent", color: "#3987e5" },
-    { slug: "logan", name: "Logan", color: "#199e70" },
-    { slug: "dad",   name: "Dad",   color: "#d95926" }
+    { slug: "logan", name: "Logan", color: "#ef7d22" },
+    { slug: "dad",   name: "Dad",   color: "#d63a3a" }
   ]
 };

@@ -62,9 +62,9 @@ async function sendTo(sb: any, subs: Sub[], msg: { title: string; body: string; 
   }));
   return sent;
 }
-// A phone never hears about rounds its player is in. Holes: "big" (default) = big moments only, "all" = every hole.
+// A phone stays quiet for rounds its player is in unless prefs.own is true. Holes: "big" (default) = big moments only, "all" = every hole.
 const holesPref = (s: Sub) => { const v: any = s.prefs?.holes; return v === "all" || v === true ? "all" : v === "off" || v === false ? "off" : "big"; };
-const wants = (s: Sub, a: Alert) => !(s.player && a.players.includes(s.player)) &&
+const wants = (s: Sub, a: Alert) => !(s.player && s.prefs?.own !== true && a.players.includes(s.player)) &&
   (a.kind === "holes" ? holesPref(s) !== "off" : (s.prefs as any)?.[a.kind] !== false);
 
 async function world(sb: any): Promise<World> {

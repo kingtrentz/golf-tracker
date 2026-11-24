@@ -537,10 +537,14 @@ body[data-tab="card"] main { padding-top: calc(env(safe-area-inset-top, 0px) + 1
 body[data-tab="card"] .live-top .headline { text-align: center; text-wrap: balance; font-size: clamp(15px, 4.1vw, 20px); line-height: 1.25; margin-top: 8px; }
 body[data-tab="card"] .step { min-width: 56px; height: 56px; font-size: 28px; }
 body[data-tab="card"] .val { min-width: 58px; height: 56px; font-size: 26px; }
-/* Single deep-dark palette (no light/dark mode switch): deep obsidian, darker oxblood header, crest gold accents. */
-:root, html[data-theme="light"], html[data-theme="dark"] {
+/* Deep-dark default palette + sunlight-friendly Light Mode */
+:root, html[data-theme="dark"] {
   --bg: #080707; --surface: #110e0e; --surface-2: #181414; --line: #282121;
   --head-top: #2b0910; --accent: #e2b53e; --on-accent: #1a1206; --on-accent-2: #4a3608;
+}
+html[data-theme="light"] {
+  --bg: #f6f2ea; --surface: #fffdf8; --surface-2: #f0eadf; --line: #e2d8c8;
+  --head-top: #f2d9d9; --accent: #c9961c; --on-accent: #1a1206; --on-accent-2: #4a3608;
 }
 /* Home Screen app: alerts box, Updated line, pull to refresh */
 main { padding-bottom: 14px; }
@@ -574,6 +578,19 @@ button.yds .ydacc { font-size: 11px; color: var(--muted); }
 button.yds .ydref { font-size: 13px; color: var(--accent); margin-left: 2px; }
 button.yds .ydoff { color: var(--accent); font-weight: 700; font-size: 13.5px; }
 button.yds .ydmsg { color: var(--muted); font-size: 12.5px; }
+/* Compact dark-mode hole silhouette */
+.hmap:empty { display: none; }
+.hmap { margin: 2px 0 8px; padding: 4px 6px; border-radius: 12px; background: color-mix(in srgb, var(--bg) 70%, transparent); border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); }
+.hsvg { display: block; width: 100%; height: auto; max-height: 92px; }
+.hfairway { fill: #172b1e; stroke: #254430; stroke-width: 1; }
+.hline { stroke: color-mix(in srgb, var(--accent) 35%, transparent); stroke-width: 1; stroke-dasharray: 3 3; }
+.hgreen { fill: #285c3a; stroke: #4ca96c; stroke-width: 1.4; }
+html[data-theme="light"] .hfairway { fill: #d9ebd8; stroke: #a8cfa7; }
+html[data-theme="light"] .hgreen { fill: #58a66c; stroke: #2d7040; }
+.htee { fill: var(--accent); opacity: .85; }
+.hpin { fill: var(--accent); }
+.hlbl { font-size: 8.5px; fill: var(--muted); font-weight: 700; letter-spacing: .6px; }
+.hlbl-y { font-size: 10px; fill: var(--accent); font-weight: 700; }
 /* Family-only gate: the whole site waits for the phrase */
 .gate { display: none; }
 html.locked body > :not(.gate) { display: none !important; }

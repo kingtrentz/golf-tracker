@@ -1751,11 +1751,12 @@ function viewCard(id) {
   const entry = ed ? `<section class="card hole">
       <div class="hhead">
         <button class="nav" data-act="hole" data-v="${hole - 1}" ${hole === 0 ? "disabled" : ""} aria-label="Previous hole">‹</button>
-        <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="cardsc" data-id="${id}">Par ${card.pars[hole]} · Hcp ${si[hole]}</button>
+        <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="cardsc" data-id="${id}">Par ${card.pars[hole]} · Hcp ${si[hole]}<span data-ryds="${id}:${hole}">${ydRoughText(card, hole)}</span></button>
           <button class="yds" data-act="yds" data-yds="${id}:${hole}">${ydText(card, hole)}</button>
           <div class="popline">${wins[hole] !== undefined ? (wins[hole] ? `<span class="hwin">${esc(pname(wins[hole]))} wins the hole</span>` : `<span class="hhalf">Hole halved</span>`) : ""}${(() => { if (wins[hole] !== undefined) return ""; const g = card.players.filter(p => pops[p][hole] > 0); return card.players.length < 2 ? "" : g.length ? `${g.map(p => esc(pname(p))).join(" & ")} ${g.length > 1 ? "stroke" : "strokes"} here` : "No strokes here"; })()}</div></div>
         <button class="nav" data-act="hole" data-v="${hole + 1}" ${hole === n - 1 ? "disabled" : ""} aria-label="Next hole">›</button>
       </div>
+      <div class="hmap" data-hmap="${id}:${hole}">${ydHoleSvg(card, hole)}</div>
       ${card.players.map(s => {
         const v = holeVals(card, s)[hole];
         const pop = pops[s][hole]; const hp = st.pts[s].per[hole];
@@ -2158,9 +2159,23 @@ document.addEventListener("change", e => {
     sb = createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
   }
   $("#fab").onclick = addMenu;
-  // Single deep-dark theme (no light/dark mode toggle).
-  document.documentElement.dataset.theme = "dark";
-  document.querySelector('meta[name="theme-color"]').content = "#2b0910";
+  // Deep-dark default with optional Light Mode toggle (saved to localStorage).
+  const themeNow = () => document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  const paintTheme = () => {
+    const t = themeNow();
+    const tb = $("#themebtn");
+    if (tb) { tb.textContent = t === "light" ? "☾" : "☀"; tb.title = t === "light" ? "Dark mode" : "Light mode"; }
+    document.querySelector('meta[name="theme-color"]').content = t === "light" ? "#f2d9d9" : "#2b0910";
+  };
+  if ($("#themebtn")) {
+    $("#themebtn").onclick = () => {
+      const next = themeNow() === "light" ? "dark" : "light";
+      document.documentElement.dataset.theme = next;
+      try { localStorage.setItem("golf_theme", next); } catch (e) { /* private mode */ }
+      paintTheme();
+    };
+  }
+  paintTheme();
   window.addEventListener("hashchange", route);
   let rz = null, lastW = innerWidth;
   window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (Math.abs(innerWidth - lastW) > 40) { lastW = innerWidth; render(); } }, 250); });
@@ -2260,8 +2275,60 @@ function ydText(card, hole) {
   const acc = yd.pos.acc > 18 ? `<span class="ydacc">±${Math.round(yd.pos.acc * M2Y)}</span>` : "";
   return `<span class="ydf">F ${y(n.front)}</span><b>${y(n.mid)}</b><span class="ydf">B ${y(n.back)}</span>${acc}<span class="ydref" aria-hidden="true">↻</span>`;
 }
+function ydGreenCenter(g) {
+  let lat = 0, lng = 0;
+  for (const p of g) { lat += p[0]; lng += p[1]; }
+  return [lat / g.length, lng / g.length];
+}
+function ydRoughText(card, hole) {
+  const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
+  if (!h?.t || !h?.g?.length) return "";
+  const y = Math.round(ydDist(h.t, ydGreenCenter(h.g)) * M2Y);
+  return y > 40 && y < 750 ? ` · ~${y} yds` : "";
+}
+function ydHoleSvg(card, hole) {
+  const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
+  if (!h?.t || !h?.g?.length) return "";
+  const gc = ydGreenCenter(h.g), t = h.t;
+  const kx = 111320 * Math.cos(t[0] * Math.PI / 180), ky = 110540;
+  const toM = p => [(p[1] - t[1]) * kx, (p[0] - t[0]) * ky];
+  const [gx, gy] = toM(gc), L = Math.hypot(gx, gy);
+  if (L < 30) return "";
+  // Rotate so tee is at bottom (0,0) and green center is straight up (0, L).
+  const ux = gx / L, uy = gy / L;
+  const rot = p => { const [x, y] = toM(p); return [x * uy - y * ux, x * ux + y * uy]; };
+  const gPts = h.g.map(rot);
+  const W = 280, H = 96, padX = 24, padY = 14;
+  // Horizontal orientation: tee on left, green on right so it stays compact on mobile!
+  const scaleX = (W - padX * 2) / (L + 28);
+  const mapX = d => padX + d * scaleX;
+  const mapY = off => H / 2 - off * Math.min(scaleX * 1.45, 0.9);
+  const poly = gPts.map(([off, d]) => `${mapX(d).toFixed(1)},${mapY(off).toFixed(1)}`).join(" ");
+  const tx = mapX(0), ty = mapY(0), gcx = mapX(L), gcy = mapY(0);
+  const yds = Math.round(L * M2Y);
+  let dotMe = "";
+  if (yd.pos) {
+    const [moff, md] = rot([yd.pos.lat, yd.pos.lng]);
+    if (md > -40 && md < L + 50 && Math.abs(moff) < 120) {
+      dotMe = `<circle cx="${mapX(md).toFixed(1)}" cy="${mapY(moff).toFixed(1)}" r="4.5" fill="#e2b53e" stroke="#080707" stroke-width="1.5"/>`;
+    }
+  }
+  return `<svg viewBox="0 0 ${W} ${H}" class="hsvg" aria-label="Hole ${hole + 1} silhouette, approximately ${yds} yards">
+    <path d="M ${tx.toFixed(1)} ${(ty - 5).toFixed(1)} Q ${((tx + gcx) / 2).toFixed(1)} ${(ty - 17).toFixed(1)} ${(gcx - 8).toFixed(1)} ${(gcy - 12).toFixed(1)} L ${(gcx - 8).toFixed(1)} ${(gcy + 12).toFixed(1)} Q ${((tx + gcx) / 2).toFixed(1)} ${(ty + 17).toFixed(1)} ${tx.toFixed(1)} ${(ty + 5).toFixed(1)} Z" class="hfairway"/>
+    <line x1="${tx.toFixed(1)}" y1="${ty.toFixed(1)}" x2="${gcx.toFixed(1)}" y2="${gcy.toFixed(1)}" class="hline"/>
+    <polygon points="${poly}" class="hgreen"/>
+    <rect x="${(tx - 4).toFixed(1)}" y="${(ty - 4).toFixed(1)}" width="8" height="8" rx="2" class="htee"/>
+    <circle cx="${gcx.toFixed(1)}" cy="${gcy.toFixed(1)}" r="2.8" class="hpin"/>
+    ${dotMe}
+    <text x="${tx.toFixed(1)}" y="${H - 6}" text-anchor="middle" class="hlbl">TEE</text>
+    <text x="${((tx + gcx) / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="hlbl-y">~${yds} yds</text>
+    <text x="${gcx.toFixed(1)}" y="${H - 6}" text-anchor="middle" class="hlbl">GREEN</text>
+  </svg>`;
+}
 function ydPaint() {
   document.querySelectorAll("[data-yds]").forEach(el => { const [id, h] = el.dataset.yds.split(":"); const card = cardById(id); if (card) el.innerHTML = ydText(card, +h); });
+  document.querySelectorAll("[data-ryds]").forEach(el => { const [id, h] = el.dataset.ryds.split(":"); const card = cardById(id); if (card) el.textContent = ydRoughText(card, +h); });
+  document.querySelectorAll("[data-hmap]").forEach(el => { const [id, h] = el.dataset.hmap.split(":"); const card = cardById(id); if (card) el.innerHTML = ydHoleSvg(card, +h); });
 }
 function ydSync() {
   if (state.tab === "card") ydLoadFile();

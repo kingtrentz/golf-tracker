@@ -303,8 +303,11 @@ async function unlock(p) {
   if (!DEMO) { const r = await sb.rpc("gt_check", { p }); if (r.error) throw r.error; ok = r.data; }
   if (!ok) return false;
   state.phrase = p; localStorage.setItem("golf_phrase", p);
-  document.documentElement.classList.remove("locked");
+  const root = document.documentElement;
+  root.classList.add("unlocking");
+  root.classList.remove("locked");
   render();
+  setTimeout(() => root.classList.remove("unlocking"), 760);
   return true;
 }
 function phraseForm(then) {
@@ -1739,8 +1742,7 @@ function viewCard(id) {
 
   // Pieces of the top box, shared by the follow-along layout and the scoring layout.
   const chips = others.length ? `<div class="chips cardsw">${state.cards.map(c => `<a class="chip ${c.id === id ? "on" : ""}" href="#card/${c.id}">${esc(splitName(c.course_name).base)}</a>`).join("")}</div>` : "";
-  const isLight = document.documentElement.dataset.theme === "light";
-  const meta = `<div class="lt-meta"><a class="oc-menu" href="#h2h" aria-label="Back to menu">‹ Menu</a><button type="button" class="oc-menu oc-theme" data-act="theme" aria-label="Switch light or dark mode">${isLight ? "☾" : "☀"}</button><span class="pulse"></span><span class="lt-course">${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span class="lt-thru">${st.thruAll ? `thru ${st.thruAll}` : fmtShort(card.played_on)}</span></div>`;
+  const meta = `<div class="lt-meta"><span class="pulse"></span><span class="lt-course">${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span class="lt-thru">${st.thruAll ? `thru ${st.thruAll}` : fmtShort(card.played_on)}</span></div>`;
   const latest = st.moments[0] && st.thruAll && !st.head.startsWith(st.moments[0].text) ? `<div class="latest">Latest: ${esc(st.moments[0].text)}</div>` : "";
   const lboard = `<div class="lboard">${board.map(x => `<div class="lrow">
       <span class="lname">${dot(x.s)}${esc(pname(x.s))}${chip(x.s)}</span>
@@ -2194,20 +2196,28 @@ document.addEventListener("click", e => {
   $("#fab").onclick = addMenu;
   // Deep-dark default with optional Light Mode toggle (saved to localStorage).
   const themeNow = () => document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  const setThemeColor = hex => {
+    // Re-inserting the meta tag forces iOS standalone PWA to repaint the very top bar immediately.
+    document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.remove());
+    const m = document.createElement("meta");
+    m.name = "theme-color";
+    m.content = hex;
+    document.head.appendChild(m);
+  };
   const paintTheme = () => {
     const t = themeNow();
     const tb = $("#themebtn");
     if (tb) { tb.textContent = t === "light" ? "☾" : "☀"; tb.title = t === "light" ? "Dark mode" : "Light mode"; }
-    document.querySelector('meta[name="theme-color"]').content = t === "light" ? "#cdbb8f" : "#4b1d5c";
+    setThemeColor(t === "light" ? "#c3b090" : "#53275a");
   };
   if ($("#themebtn")) {
     $("#themebtn").onclick = () => {
       const next = themeNow() === "light" ? "dark" : "light";
-      // status bar color first, then the page, in the same frame
-      document.querySelector('meta[name="theme-color"]').content = next === "light" ? "#cdbb8f" : "#4b1d5c";
       document.documentElement.dataset.theme = next;
       try { localStorage.setItem("golf_theme", next); } catch (e) { /* private mode */ }
       paintTheme();
+      // Force iOS WebKit compositor repaint of the safe-area top band without needing a reload.
+      requestAnimationFrame(() => { document.documentElement.style.backgroundColor = getComputedStyle(document.documentElement).getPropertyValue("--bg"); });
     };
   }
   paintTheme();
@@ -2586,38 +2596,42 @@ $("#al-off").addEventListener("click", async () => {
   } catch (e) { note.textContent = "Couldn't turn alerts off right now. Try again in a bit."; }
   alertsUI();
 });
-// Refreshing inside the installed app (it has no reload button): pull down from the top, tap the
-// "Updated" line, or come back after 5+ minutes away (also picks up new versions of the site).
+// Refreshing inside the installed app (it has no reload button): pull down from the top (non-live tabs),
+// tap the "Updated" line, or come back after 5+ minutes away (also picks up new versions of the site).
 (() => {
   if (!inApp()) return;
   document.documentElement.classList.add("app");
-  // Pull down from the top: the page slides down over the locked crest watermark, the crest rises into the
-  // gap above it, and on release everything flings back up with a bounce (and refreshes past the line).
+  // Elastic pull-down on non-live tabs: drag as far down as you want to fiddle with it while the
+  // page background and locked crest watermark stay put underneath; the spinning crest floats in the gap.
   const ind = document.createElement("div"); ind.className = "ptr"; ind.setAttribute("aria-hidden", "true");
   ind.innerHTML = `<img src="crest.webp?v=202611232130" alt=""><span>Pull to refresh</span>`;
-  const band = document.createElement("div"); band.className = "ptrbg"; band.setAttribute("aria-hidden", "true");
-  document.body.append(band, ind);
+  document.body.append(ind);
   const lbl = ind.querySelector("span"), root = document.documentElement;
-  const busy = () => !$("#modal").hidden;
-  const LINE = 90;
+  const busy = () => !$("#modal").hidden || document.body.dataset.tab === "card";
+  const LINE = 105;
   const setPull = (p, mode) => {
-    root.classList.toggle("settle", !!mode); root.style.setProperty("--pull", p.toFixed(1) + "px");
-    const k = Math.min(1, p / 70);
+    root.classList.toggle("settle", !!mode);
+    root.style.setProperty("--pull", p.toFixed(1) + "px");
+    root.style.setProperty("--ptr-rot", (p * 2.2).toFixed(0) + "deg");
+    const k = Math.min(1, p / 65);
     ind.style.opacity = k.toFixed(2);
-    ind.style.transform = `translate3d(-50%,${(p / 2 - 34).toFixed(1)}px,0) scale(${(0.7 + 0.3 * k).toFixed(3)})`;
+    const y = Math.max(-34, p * 0.42 - 26);
+    ind.style.transform = `translate3d(-50%,${y.toFixed(1)}px,0) scale(${(0.72 + 0.34 * k).toFixed(3)})`;
   };
   const go = () => {
     lbl.textContent = "Refreshing…"; ind.classList.add("spin");
-    setPull(80, true);
-    setTimeout(() => { setPull(0, true); setTimeout(() => location.reload(), 380); }, 420);
+    setPull(92, true);
+    setTimeout(() => { setPull(0, true); setTimeout(() => location.reload(), 420); }, 460);
   };
   let y0 = null, d = 0, raf = 0, armed = null;
   const paint = () => {
     raf = 0;
     if (y0 === null) return;
     const pull = Math.max(0, d - 6);
-    setPull(130 * (1 - Math.exp(-pull / 120)), false);
-    const a = d > LINE;
+    const maxPull = Math.max(360, innerHeight * 0.72);
+    const travel = maxPull * (1 - Math.exp(-pull / (maxPull * 0.65)));
+    setPull(travel, false);
+    const a = travel > LINE;
     if (a !== armed) { armed = a; lbl.textContent = a ? "Let go to refresh" : "Pull to refresh"; }
   };
   addEventListener("touchstart", e => {
@@ -2626,18 +2640,22 @@ $("#al-off").addEventListener("click", async () => {
   addEventListener("touchmove", e => {
     if (y0 === null) return;
     d = e.touches[0].clientY - y0;
-    if (d < 0) { y0 = null; setPull(0, true); return; } // scrolling up: let the page scroll
+    if (d <= 0) { y0 = null; setPull(0, true); return; } // scrolling up: let the page scroll
+    if (d > 6) e.preventDefault();
     if (!raf) raf = requestAnimationFrame(paint);
-  }, { passive: true });
+  }, { passive: false });
   const release = () => {
     if (y0 === null) return;
-    const fire = d > LINE; y0 = null; d = 0;
+    const pull = Math.max(0, d - 6);
+    const maxPull = Math.max(360, innerHeight * 0.72);
+    const travel = maxPull * (1 - Math.exp(-pull / (maxPull * 0.65)));
+    const fire = travel > LINE; y0 = null; d = 0;
     if (fire) go(); else setPull(0, true);
   };
   addEventListener("touchend", release, { passive: true });
   addEventListener("touchcancel", release, { passive: true });
   $("#upd").addEventListener("click", () => { if (!busy()) go(); });
   let away = 0;
-  document.addEventListener("visibilitychange", () => { if (document.hidden) away = Date.now(); else if (away && Date.now() - away > 5 * 60000 && !busy()) location.reload(); });
+  document.addEventListener("visibilitychange", () => { if (document.hidden) away = Date.now(); else if (away && Date.now() - away > 5 * 60000 && $("#modal").hidden) location.reload(); });
   if (state.updatedAt) stampUpd();
 })();

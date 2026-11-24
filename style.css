@@ -509,17 +509,23 @@ button.primary.big { width: 100%; padding: 14px; font-size: 17px; }
 .row4[hidden], .hint[hidden], .teelink[hidden] { display: none; }
 .teelink { display: block; margin: -2px 0 12px; font-size: 13.5px; text-align: left; }
 input.bigscore { font-size: 30px; font-weight: 800; padding: 12px 14px; text-align: center; letter-spacing: .5px; }
-/* McGrath crest: faint watermark behind the whole site */
+/* McGrath crest: real GPU-locked watermark layer behind the whole site (never glitches on iOS WebKit) */
 body { background: transparent; }
-body::before {
-  content: ""; position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  background: url("crest.webp?v=202611232130") center 58% / min(78vw, 520px) auto no-repeat;
-  opacity: var(--crest-o, .24);
+.watermark {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  display: flex; align-items: center; justify-content: center;
+  padding-top: 10vh;
+  transform: translate3d(0, 0, 0);
 }
-html[data-theme="light"] body::before { opacity: var(--crest-o, .26); }
-@media (prefers-color-scheme: light) { html:not([data-theme="dark"]) body::before { opacity: var(--crest-o, .26); } }
+.watermark img {
+  width: min(78vw, 520px); height: auto;
+  opacity: var(--crest-o, .24);
+  user-select: none; -webkit-user-select: none;
+}
+html[data-theme="light"] .watermark img { opacity: var(--crest-o, .26); }
+@media (prefers-color-scheme: light) { html:not([data-theme="dark"]) .watermark img { opacity: var(--crest-o, .26); } }
 /* See-through cards so the crest shows across the page (including Live Match Play; hidden on Gallery) */
-body[data-tab="gallery"]::before { display: none; }
+body[data-tab="gallery"] .watermark { display: none; }
 #demo, main, .alertsbox, footer { position: relative; z-index: 2; }
 body:not([data-tab="gallery"]) #main :is(.card, .tile, .spot, .hero) { background-color: color-mix(in srgb, var(--surface) var(--glass, 78%), transparent); }
 body:not([data-tab="gallery"]) #main .match { background-color: color-mix(in srgb, var(--surface-2) var(--glass, 78%), transparent); }
@@ -663,7 +669,8 @@ button.lcourse.add { font-size: 15px; background: var(--gold-bg); border: 1px so
 .gcourses button.on { background: var(--gold-bg); border-color: var(--accent); font-weight: 700; }
 /* Desktop: keep the crest below the sticky header and sized to the space left (it was clipped by the header) */
 @media (min-width: 700px) {
-  body::before { top: 150px; background-position: center 80%; background-size: min(78vw, 500px, calc((100vh - 190px) * .93)) auto; }
+  .watermark { top: 150px; padding-top: 0; }
+  .watermark img { width: min(78vw, 500px, calc((100vh - 190px) * .93)); }
 }
 .pctown { display: grid; grid-template-columns: minmax(0, 1fr) 74px auto; gap: 6px; margin-bottom: 6px; }
 .pctown select { padding: 10px 6px; }
@@ -683,17 +690,16 @@ header h1:has(.tw)::before { display: block; margin: 0 auto 3px; width: 40px; he
 .hnote { margin: 2px 4px 10px; text-align: center; font-size: 13.5px; line-height: 1.35; color: var(--text-2); }
 .hnote:empty { display: none; }
 
-/* Theme switch: the page itself paints the area under the iPhone status bar (black-translucent), and the
-   root background follows the theme so the top never shows the old color. */
+/* Theme switch: root background follows the theme, and a real fixed topbar paints under the iPhone status bar immediately on toggle. */
 html { background: var(--bg); }
-/* Status bar safe-area band: always paints the active theme's header color immediately on toggle. */
-html.app body::after { content: ""; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: var(--head-top); z-index: 80; pointer-events: none; }
-html.app[data-theme="light"] body::after { background: color-mix(in srgb, var(--head-top) 58%, #3a2c14); }
+.topbar { display: none; }
+html.app .topbar { display: block; position: fixed; top: 0; left: 0; right: 0; height: env(safe-area-inset-top, 0px); background: var(--head-top); z-index: 80; pointer-events: none; transform: translate3d(0, 0, 0); }
+html.app[data-theme="light"] .topbar { background: color-mix(in srgb, var(--head-top) 58%, #3a2c14); }
 /* App pull to refresh (non-live tabs): content slides far down with the finger, the page background
    and locked crest watermark stay put underneath, and the spinning crest floats in the gap. */
 html.app { overscroll-behavior-y: none; }
 html.app body { overscroll-behavior-y: none; }
-html.app :is(header, #demo, .alertsbox, main, footer) { transform: translate3d(0, var(--pull, 0px), 0); will-change: transform; }
+html.app:is(.pulling, .settle) :is(header, #demo, .alertsbox, main, footer) { transform: translate3d(0, var(--pull, 0px), 0); will-change: transform; }
 html.app.settle :is(header, #demo, .alertsbox, main, footer) { transition: transform .58s cubic-bezier(.34,1.45,.64,1); }
 .ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 12px); z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 5px;
   opacity: 0; transform: translate3d(-50%, -34px, 0) scale(.7); pointer-events: none; will-change: transform, opacity; color: var(--text-2); font-size: 12px; font-weight: 700; letter-spacing: .02em; }

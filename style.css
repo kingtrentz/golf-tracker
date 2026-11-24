@@ -552,10 +552,11 @@ body[data-tab="card"] #ocmenu { display: inline-flex; position: absolute; left: 
 body[data-tab="card"] .live-top .headline { text-align: center; text-wrap: balance; font-size: clamp(15px, 4.1vw, 20px); line-height: 1.25; margin-top: 8px; }
 body[data-tab="card"] .step { min-width: 56px; height: 56px; font-size: 28px; }
 body[data-tab="card"] .val { min-width: 58px; height: 56px; font-size: 26px; }
-/* Clubhouse palette (Nov 24): dark = hand-stained prune Chesterfield + antique brass, light = tufted sand suede + walnut brass. */
+/* Clubhouse palette (Nov 24): dark = hand-stained prune Chesterfield + burnished champagne brass, light = tufted sand suede + walnut brass. */
 :root, html[data-theme="dark"] {
   --bg: #150c17; --surface: #231326; --surface-2: #301b34; --line: #482c4e;
-  --head-top: #53275a; --accent: #d4a84b; --gold: #d4a84b; --on-accent: #191106; --on-accent-2: #4a3608;
+  --head-top: #53275a; --accent: #bfa478; --gold: #c7ad82; --on-accent: #1a120a; --on-accent-2: #4a3a24;
+  --gold-text: #e2cfa8; --gold-line: #5a4b34; --gold-line2: #493d2b; --gold-glow: #292118; --gold-bg: #33291e;
 }
 html[data-theme="light"] {
   --bg: #dfd3be; --surface: #f3ecdf; --surface-2: #e7dcc8; --line: #cbbba0;

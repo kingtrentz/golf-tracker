@@ -1181,6 +1181,7 @@ function matchForm(mt) {
       try {
         if (c.course_name && c.rating && c.slope && c.par) row.course_id = await ensureCourse({ ...c, name: c.course_name });
         await save("matches", row, editing ? mt.id : null);
+        if (row.course_name) { ydLoadFile(); ydFetchLive({ course_name: row.course_name, course_id: row.course_id, pars: state.courses.find(x => x.id === row.course_id)?.pars || Array(18).fill(4) }).catch(() => {}); }
         closeModal(); await refresh(); toast("Match saved.");
       } catch (err) { toast("Couldn't save: " + errMsg(err)); }
     };
@@ -2200,7 +2201,7 @@ const M2Y = 1.09361;
 function ydLoadFile() {
   if (yd.file) return;
   yd.file = {};
-  fetch("greens.json?v=202611232300").then(r => r.ok ? r.json() : {}).then(j => { yd.file = j || {}; ydPaint(); }).catch(() => {});
+  fetch("greens.json?v=202611240234").then(r => r.ok ? r.json() : {}).then(j => { yd.file = j || {}; ydPaint(); }).catch(() => {});
 }
 function ydCourse(card) {
   const c = state.courses.find(x => x.id === card.course_id) || state.courses.find(x => x.name === card.course_name && x.lat != null);
@@ -2220,7 +2221,7 @@ const ydPip = (pt, poly) => { let c = false; for (let i = 0, j = poly.length - 1
 // Course not in greens.json: ask OpenStreetMap (Overpass) once, match holes the same way the build script does.
 async function ydFetchLive(card) {
   const loc = ydCourse(card); if (!loc) { yd.live[card.course_name] = {}; ydPaint(); return; }
-  const q = `[out:json][timeout:25];(way["golf"="hole"](around:2500,${loc.lat},${loc.lng});way["golf"="green"](around:2500,${loc.lat},${loc.lng}););out tags geom;`;
+  const q = `[out:json][timeout:25];(way["golf"="hole"](around:1800,${loc.lat},${loc.lng});way["golf"="green"](around:1800,${loc.lat},${loc.lng});way["golf"="fairway"](around:1800,${loc.lat},${loc.lng});way["golf"="bunker"](around:1800,${loc.lat},${loc.lng});way["golf"="water_hazard"](around:1800,${loc.lat},${loc.lng});way["golf"="lateral_water_hazard"](around:1800,${loc.lat},${loc.lng});way["natural"="water"](around:1800,${loc.lat},${loc.lng}););out tags geom;`;
   let j = null;
   for (const u of OVERPASS) { try { const r = await timed(u, { method: "POST", body: "data=" + encodeURIComponent(q) }, 30000); if (r.ok) { j = await r.json(); break; } } catch (e) { /* next */ } }
   if (!j) { yd.live[card.course_name] = {}; ydPaint(); return; } // no answer: no yardages this time (tap off/on to retry)
@@ -2242,6 +2243,31 @@ async function ydFetchLive(card) {
   const holes = {};
   (best || []).forEach(h => { if (h.ref <= card.pars.length && String(card.pars[h.ref - 1]) === h.par) holes[h.ref] = holes[h.ref] ? "dup" : { g: h.g, t: h.tee }; });
   Object.keys(holes).forEach(k => { if (holes[k] === "dup") delete holes[k]; });
+  // Attach nearby fairways, bunkers, water hazards, and trees to each hole automatically.
+  const ctr = g => [g.reduce((s, p) => s + p[0], 0) / g.length, g.reduce((s, p) => s + p[1], 0) / g.length];
+  const segD = (p, a, b) => {
+    const kx = 111320 * Math.cos(a[0] * Math.PI / 180), ky = 110540;
+    const px = (p[1] - a[1]) * kx, py = (p[0] - a[0]) * ky, bx = (b[1] - a[1]) * kx, by = (b[0] - a[0]) * ky;
+    const l2 = bx * bx + by * by; if (l2 < 1e-6) return Math.hypot(px, py);
+    const t = Math.max(0, Math.min(1, (px * bx + py * by) / l2)); return Math.hypot(px - t * bx, py - t * by);
+  };
+  const simp = (g, m) => g.length <= m ? g : Array.from({ length: m }, (_, i) => g[Math.floor(i * g.length / m)]);
+  const fws = [], bks = [], wts = [], trs = [];
+  for (const w of j.elements) {
+    const g = geo(w); if (g.length < 3) continue; const tg = w.tags || {}, c = ctr(g);
+    if (tg.golf === "fairway") fws.push([c, g]);
+    else if (tg.golf === "bunker") bks.push([c, g]);
+    else if (tg.golf === "water_hazard" || tg.golf === "lateral_water_hazard" || tg.natural === "water") wts.push([c, g]);
+    else if (tg.natural === "wood" || tg.landuse === "forest") trs.push([c, g]);
+  }
+  for (const h of Object.values(holes)) {
+    const gc = ctr(h.g);
+    const fw = fws.filter(([c]) => segD(c, h.t, gc) < 55).map(([, g]) => simp(g, 24));
+    const bk = bks.filter(([c]) => segD(c, h.t, gc) < 65).map(([, g]) => simp(g, 16));
+    const wt = wts.filter(([c]) => segD(c, h.t, gc) < 85).map(([, g]) => simp(g, 22));
+    const tr = trs.filter(([c]) => segD(c, h.t, gc) < 85).map(([, g]) => simp(g, 22));
+    if (fw.length) h.fw = fw; if (bk.length) h.bk = bk; if (wt.length) h.wt = wt; if (tr.length) h.tr = tr;
+  }
   yd.live[card.course_name] = holes;
   if (Object.keys(holes).length) try { localStorage.setItem("golf_greens_" + card.course_name, JSON.stringify({ at: Date.now(), holes })); } catch (e) { /* full */ }
   ydPaint();
@@ -2300,14 +2326,21 @@ function ydHoleSvg(card, hole) {
   const ux = gx / L, uy = gy / L;
   const rot = p => { const [x, y] = toM(p); return [x * uy - y * ux, x * ux + y * uy]; };
   const gPts = h.g.map(rot);
-  const W = 280, H = 96, padX = 24, padY = 14;
+  const W = 280, H = 104, padX = 24;
   // Horizontal orientation: tee on left, green on right so it stays compact on mobile!
   const scaleX = (W - padX * 2) / (L + 28);
   const mapX = d => padX + d * scaleX;
-  const mapY = off => H / 2 - off * Math.min(scaleX * 1.45, 0.9);
-  const poly = gPts.map(([off, d]) => `${mapX(d).toFixed(1)},${mapY(off).toFixed(1)}`).join(" ");
+  const mapY = off => H / 2 - off * Math.min(scaleX * 1.45, 0.85);
+  const toPoly = pts => pts.map(rot).map(([off, d]) => `${mapX(d).toFixed(1)},${mapY(off).toFixed(1)}`).join(" ");
+  const poly = toPoly(h.g);
   const tx = mapX(0), ty = mapY(0), gcx = mapX(L), gcy = mapY(0);
   const yds = Math.round(L * M2Y);
+  const trSvg = (h.tr || []).map(p => `<polygon points="${toPoly(p)}" class="htree"/>`).join("");
+  const wtSvg = (h.wt || []).map(p => `<polygon points="${toPoly(p)}" class="hwater"/>`).join("");
+  const fwSvg = (h.fw && h.fw.length)
+    ? h.fw.map(p => `<polygon points="${toPoly(p)}" class="hfairway"/>`).join("")
+    : `<path d="M ${tx.toFixed(1)} ${(ty - 5).toFixed(1)} Q ${((tx + gcx) / 2).toFixed(1)} ${(ty - 17).toFixed(1)} ${(gcx - 8).toFixed(1)} ${(gcy - 12).toFixed(1)} L ${(gcx - 8).toFixed(1)} ${(gcy + 12).toFixed(1)} Q ${((tx + gcx) / 2).toFixed(1)} ${(ty + 17).toFixed(1)} ${tx.toFixed(1)} ${(ty + 5).toFixed(1)} Z" class="hfairway"/>`;
+  const bkSvg = (h.bk || []).map(p => `<polygon points="${toPoly(p)}" class="hbunker"/>`).join("");
   let dotMe = "";
   if (yd.pos) {
     const [moff, md] = rot([yd.pos.lat, yd.pos.lng]);
@@ -2316,15 +2349,15 @@ function ydHoleSvg(card, hole) {
     }
   }
   return `<svg viewBox="0 0 ${W} ${H}" class="hsvg" aria-label="Hole ${hole + 1} silhouette, approximately ${yds} yards">
-    <path d="M ${tx.toFixed(1)} ${(ty - 5).toFixed(1)} Q ${((tx + gcx) / 2).toFixed(1)} ${(ty - 17).toFixed(1)} ${(gcx - 8).toFixed(1)} ${(gcy - 12).toFixed(1)} L ${(gcx - 8).toFixed(1)} ${(gcy + 12).toFixed(1)} Q ${((tx + gcx) / 2).toFixed(1)} ${(ty + 17).toFixed(1)} ${tx.toFixed(1)} ${(ty + 5).toFixed(1)} Z" class="hfairway"/>
+    ${trSvg}${wtSvg}${fwSvg}${bkSvg}
     <line x1="${tx.toFixed(1)}" y1="${ty.toFixed(1)}" x2="${gcx.toFixed(1)}" y2="${gcy.toFixed(1)}" class="hline"/>
     <polygon points="${poly}" class="hgreen"/>
     <rect x="${(tx - 4).toFixed(1)}" y="${(ty - 4).toFixed(1)}" width="8" height="8" rx="2" class="htee"/>
     <circle cx="${gcx.toFixed(1)}" cy="${gcy.toFixed(1)}" r="2.8" class="hpin"/>
     ${dotMe}
-    <text x="${tx.toFixed(1)}" y="${H - 6}" text-anchor="middle" class="hlbl">TEE</text>
-    <text x="${((tx + gcx) / 2).toFixed(1)}" y="${H - 6}" text-anchor="middle" class="hlbl-y">~${yds} yds</text>
-    <text x="${gcx.toFixed(1)}" y="${H - 6}" text-anchor="middle" class="hlbl">GREEN</text>
+    <text x="${tx.toFixed(1)}" y="${H - 5}" text-anchor="middle" class="hlbl">TEE</text>
+    <text x="${((tx + gcx) / 2).toFixed(1)}" y="${H - 5}" text-anchor="middle" class="hlbl-y">~${yds} yds</text>
+    <text x="${gcx.toFixed(1)}" y="${H - 5}" text-anchor="middle" class="hlbl">GREEN</text>
   </svg>`;
 }
 function ydPaint() {

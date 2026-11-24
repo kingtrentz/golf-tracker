@@ -2628,7 +2628,11 @@ $("#al-off").addEventListener("click", async () => {
     lbl.textContent = "Refreshing…"; ind.classList.add("spin");
     setPull(116, "glide");
     const minSpin = new Promise(r => setTimeout(r, 580));
-    await Promise.all([minSpin, loadData().then(() => render()).catch(() => {})]);
+    const refreshWork = Promise.race([
+      loadData().then(() => render()).catch(() => {}),
+      new Promise(r => setTimeout(r, 4500))
+    ]);
+    await Promise.all([minSpin, refreshWork]);
     setPull(0, "glide");
     setTimeout(() => { refreshing = false; lbl.textContent = "Pull to refresh"; }, 460);
   };
@@ -2643,26 +2647,33 @@ $("#al-off").addEventListener("click", async () => {
     const a = travel > LINE;
     if (a !== armed) { armed = a; lbl.textContent = a ? "Let go to refresh" : "Pull to refresh"; }
   };
-  addEventListener("touchstart", e => {
-    y0 = (scrollY <= 2 && e.touches.length === 1 && !busy() && !e.target.closest("canvas,input,textarea,select,.tabs,.lpic")) ? e.touches[0].clientY : null; d = 0; armed = null;
-  }, { passive: true });
-  addEventListener("touchmove", e => {
-    if (y0 === null) return;
-    d = e.touches[0].clientY - y0;
-    if (d <= 0) { y0 = null; setPull(0, "glide"); return; } // scrolling up: let the page scroll
-    if (d > 6) e.preventDefault();
-    if (!raf) raf = requestAnimationFrame(paint);
-  }, { passive: false });
   const release = () => {
     if (y0 === null) return;
+    if (raf) { cancelAnimationFrame(raf); raf = 0; }
     const pull = Math.max(0, d - 6);
     const maxPull = Math.max(360, innerHeight * 0.72);
     const travel = maxPull * (1 - Math.exp(-pull / (maxPull * 0.65)));
     const fire = travel > LINE; y0 = null; d = 0;
     if (fire) go(); else setPull(0, "bounce");
   };
-  addEventListener("touchend", release, { passive: true });
-  addEventListener("touchcancel", release, { passive: true });
+  addEventListener("touchstart", e => {
+    if (refreshing) return;
+    y0 = (scrollY <= 2 && e.touches.length === 1 && !busy() && !e.target.closest("canvas,input,textarea,select,.tabs,.lpic")) ? e.touches[0].clientY : null; d = 0; armed = null;
+  }, { passive: true, capture: true });
+  addEventListener("touchmove", e => {
+    if (y0 === null) return;
+    if (!e.touches.length) { release(); return; }
+    const cy = e.touches[0].clientY;
+    d = cy - y0;
+    if (d <= 0) { y0 = null; setPull(0, "glide"); return; } // scrolling up: let the page scroll
+    if (cy >= innerHeight - 16) { release(); return; } // iOS home-bar zone: release before system steals touchend
+    if (d > 6) e.preventDefault();
+    if (!raf) raf = requestAnimationFrame(paint);
+  }, { passive: false, capture: true });
+  addEventListener("touchend", e => { if (!e.touches?.length) release(); }, { passive: true, capture: true });
+  addEventListener("touchcancel", release, { passive: true, capture: true });
+  addEventListener("pointercancel", release, { passive: true, capture: true });
+  addEventListener("blur", release);
   $("#upd").addEventListener("click", () => { if (!busy()) go(); });
   let away = 0;
   document.addEventListener("visibilitychange", () => { if (document.hidden) away = Date.now(); else if (away && Date.now() - away > 5 * 60000 && $("#modal").hidden) location.reload(); });

@@ -2393,6 +2393,8 @@ function ydHoleSvg(card, hole) {
     <text x="${gcx.toFixed(1)}" y="${H - 5}" text-anchor="middle" class="hlbl">GREEN</text>
   </svg>`;
 }
+// Hand-entered shapes for holes the map data can't see (no fairway outline). Trent's calls.
+const HOLE_SHAPE = { "CrossWinds Golf Course": { 4: "Dogleg left" } };
 // Caddy note: one line per hole from the course outline data (OpenStreetMap): shape, water, sand.
 // Distances are yards from the tee along the line to the middle of the green. No club advice.
 function ydHoleNote(card, hole) {
@@ -2412,8 +2414,10 @@ function ydHoleNote(card, hole) {
   const Y = m => Math.round(m * M2Y / 5) * 5;
   const par = card.pars[hole], bits = [];
   const center = poly => { const r = poly.map(rel); return { a: r.reduce((q, x) => q + x.a, 0) / r.length, s: r.reduce((q, x) => q + x.s, 0) / r.length, pts: r }; };
-  // Shape: where the fairway bends away from the straight line
-  if (par >= 4 && h.fw?.length) {
+  // Shape: where the fairway bends away from the straight line (a hand-entered shape wins)
+  const fixShape = HOLE_SHAPE[card.course_name]?.[hole + 1];
+  if (fixShape) bits.push(fixShape);
+  else if (par >= 4 && h.fw?.length) {
     const pts = h.fw.flatMap(poly => poly.map(rel)).filter(x => x.a > L * 0.25 && x.a < L * 0.8);
     if (pts.length) {
       // The fairway bulges out on the far side of the straight line: bulge right = dogleg left.

@@ -2201,7 +2201,7 @@ const M2Y = 1.09361;
 function ydLoadFile() {
   if (yd.file) return;
   yd.file = {};
-  fetch("greens.json?v=202611240234").then(r => r.ok ? r.json() : {}).then(j => { yd.file = j || {}; ydPaint(); }).catch(() => {});
+  fetch("greens.json?v=202611240249").then(r => r.ok ? r.json() : {}).then(j => { yd.file = j || {}; ydPaint(); }).catch(() => {});
 }
 function ydCourse(card) {
   const c = state.courses.find(x => x.id === card.course_id) || state.courses.find(x => x.name === card.course_name && x.lat != null);

@@ -580,3 +580,10 @@ html.locked .gate { display: flex; position: fixed; inset: 0; z-index: 100; alig
 .gbox input { text-align: center; font-size: 18px; padding: 13px; }
 .gbox button.primary { padding: 13px; font-size: 17px; }
 .gmsg { margin: 0; min-height: 18px; color: var(--danger); font-size: 13.5px; }
+/* Photo viewer: swipe, count, edit */
+.lpic { position: relative; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
+.lpic img { -webkit-touch-callout: none; }
+.lcount { position: absolute; right: 8px; bottom: 18px; background: #000a; color: #fff; font-size: 12px; padding: 3px 8px; border-radius: 99px; }
+.lswipe { display: none; margin: 4px 0 0; }
+@media (hover: none) { .lswipe { display: block; } }
+.peimg { display: block; width: 100%; max-height: 220px; object-fit: contain; background: #000; border-radius: 8px; margin: 0 0 12px; }

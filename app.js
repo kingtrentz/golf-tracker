@@ -606,10 +606,12 @@ function photoForm(matchId) {
       <div id="phprev" class="phprev"></div>
       <label>Caption<input name="caption" maxlength="200" placeholder="Optional"></label>
       <label>Round<select name="match"><option value="">None</option>${recent.map(m => `<option value="${m.id}" ${m.id === matchId ? "selected" : ""}>${fmtShort(m.scheduled_for)} · ${esc(splitName(m.course_name || "").base || "round")}</option>`).join("")}</select></label>
+      ${photoCourseField(matchId ? state.matches.find(x => x.id === matchId)?.course_name : "")}
       <p class="hint">Up to 20 at a time. Photos are shrunk before upload, so it's quick on data.</p>
       <div class="acts"><button class="primary" type="submit" disabled>Upload</button></div>
     </form>`, m => {
     const f = $("#phf", m), btn = f.querySelector("[type=submit]");
+    wirePhotoCourse(f);
     f.files.onchange = () => {
       const list = [...f.files.files].slice(0, 20);
       $("#phprev", m).innerHTML = list.map(x => `<img src="${URL.createObjectURL(x)}" alt="">`).join("");
@@ -619,7 +621,7 @@ function photoForm(matchId) {
       e.preventDefault();
       const list = [...f.files.files].slice(0, 20); if (!list.length) return;
       btn.disabled = true;
-      const match_id = f.match.value || null, caption = f.caption.value.trim() || null;
+      const match_id = f.match.value || null, caption = f.caption.value.trim() || null, course_name = f.course.value.trim() || null;
       const mt = state.matches.find(x => x.id === match_id);
       let done = 0;
       try {
@@ -637,7 +639,7 @@ function photoForm(matchId) {
             if (b.error) throw b.error;
             row = { path: s.path, thumb: s.thumb };
           }
-          await save("photos", { ...row, caption, match_id, taken_on: mt ? mt.scheduled_for : fileDay(list[i]), width: full.w, height: full.h });
+          await save("photos", { ...row, caption, match_id, course_name, taken_on: mt ? mt.scheduled_for : fileDay(list[i]), width: full.w, height: full.h });
           done++;
         }
         closeModal(); await loadPhotos(); if (state.tab === "gallery") render(); else location.hash = "gallery";
@@ -659,26 +661,84 @@ function viewGallery() {
     <div class="ghead"><h3>Gallery</h3><button class="primary ed" data-act="add-photo">+ Add photos</button></div>
     ${ph.length ? Object.entries(months).map(([k, list]) => `<div class="gmonth">${mName(k)}</div>
       <div class="ggrid">${list.map(p => `<button class="gph" data-act="photo" data-id="${p.id}" aria-label="${esc(p.caption || "Photo")}"><img src="${esc(photoUrl(p.thumb || p.path))}" loading="lazy" alt="${esc(p.caption || "")}"></button>`).join("")}</div>`).join("")
-      : `<div class="empty">No photos yet.${editing() ? "" : " Tap Enter scores, then add some."}</div>`}
+      : `<div class="empty">No photos yet.</div>`}
     <p class="hint ed">Anyone with the family phrase can add photos.</p>
   </section>`;
 }
+// Course on a photo: typed or picked from saved courses; picking a round fills it in.
+const courseNames = () => [...new Set(state.courses.map(c => c.name))].sort();
+const photoCourse = p => p.course_name || (p.match_id && state.matches.find(m => m.id === p.match_id)?.course_name) || "";
+function photoCourseField(v) {
+  return `<label>Course<input name="course" list="phcourses" maxlength="120" placeholder="Optional" value="${esc(v || "")}"></label>
+    <datalist id="phcourses">${courseNames().map(n => `<option value="${esc(n)}">`).join("")}</datalist>`;
+}
+function wirePhotoCourse(f) {
+  let typed = !!f.course.value;
+  f.course.oninput = () => { typed = !!f.course.value; };
+  f.match.onchange = () => { const mt = state.matches.find(x => x.id === f.match.value); if (mt?.course_name && !typed) f.course.value = mt.course_name; };
+}
 function photoView(id) {
   const ph = state.photos || [], i = ph.findIndex(p => p.id === id); if (i < 0) return;
-  const p = ph[i], mt = p.match_id && state.matches.find(m => m.id === p.match_id);
+  const p = ph[i], where = photoCourse(p);
+  const newer = ph[i - 1]?.id, older = ph[i + 1]?.id;
   openModal(`<div class="lbox">
-    <img src="${esc(photoUrl(p.path))}" alt="${esc(p.caption || "")}">
+    <div class="lpic"><img src="${esc(photoUrl(p.path))}" alt="${esc(p.caption || "")}" draggable="false"><span class="lcount">${i + 1} / ${ph.length}</span></div>
     ${p.caption ? `<div class="lcap">${esc(p.caption)}</div>` : ""}
-    <div class="muted small">${fmtDate(p.taken_on)}${mt ? ` · ${esc(mt.course_name)}` : ""}</div>
-    <div class="acts">${i > 0 ? `<button data-pv="${ph[i - 1].id}">‹ Newer</button>` : ""}${i < ph.length - 1 ? `<button data-pv="${ph[i + 1].id}">Older ›</button>` : ""}
-      <button class="link ed" id="phdel">Delete</button></div></div>`, m => {
+    <div class="muted small">${fmtDate(p.taken_on)}${where ? ` · ${esc(where)}` : ""}</div>
+    <div class="acts">${newer ? `<button data-pv="${newer}">‹ Newer</button>` : ""}${older ? `<button data-pv="${older}">Older ›</button>` : ""}
+      <button class="link ed" id="phedit">Edit</button><button class="link ed" id="phdel">Delete</button></div>
+    <p class="hint lswipe">Swipe for the next one.</p></div>`, m => {
     m.querySelectorAll("[data-pv]").forEach(b => b.onclick = () => photoView(b.dataset.pv));
+    // Swipe left = older, right = newer (ignores mostly-vertical moves so the sheet still scrolls)
+    const pic = $(".lpic", m); let x0 = null, y0 = 0;
+    pic.addEventListener("touchstart", e => { if (e.touches.length === 1) { x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; } }, { passive: true });
+    pic.addEventListener("touchend", e => {
+      if (x0 == null) return; const t = e.changedTouches[0], dx = t.clientX - x0, dy = t.clientY - y0; x0 = null;
+      if (Math.abs(dx) < 45 || Math.abs(dy) > Math.abs(dx)) return;
+      const to = dx < 0 ? older : newer; if (to) photoView(to);
+    });
+    m.onkeydown = e => { if (e.key === "ArrowLeft" && newer) photoView(newer); if (e.key === "ArrowRight" && older) photoView(older); };
+    $("#phedit", m).onclick = () => photoEdit(id);
     $("#phdel", m).onclick = async () => {
       if (!editing()) return phraseForm(() => photoView(id));
       if (!confirm("Delete this photo for everyone?")) return;
       try { if (DEMO) state.photos = ph.filter(x => x.id !== id); else { await galleryFn({ action: "delete", id }); await loadPhotos(); }
         closeModal(); render(); toast("Deleted."); } catch (err) { toast("Couldn't delete: " + errMsg(err)); }
     };
+  });
+}
+// Edit caption, course and round on a photo already in the gallery. "Save & next" walks to the next older photo.
+function photoEdit(id) {
+  if (!editing()) return phraseForm(() => photoEdit(id));
+  const ph = state.photos || [], i = ph.findIndex(p => p.id === id); if (i < 0) return;
+  const p = ph[i], older = ph[i + 1]?.id;
+  const rounds = state.matches.filter(m => daysBetween(m.scheduled_for, today()) >= 0).sort(byDate).reverse().slice(0, 30);
+  openModal(`<h2>Edit photo</h2>
+    <form id="pef">
+      <img class="peimg" src="${esc(photoUrl(p.thumb || p.path))}" alt="">
+      <label>Caption<input name="caption" maxlength="200" placeholder="Optional" value="${esc(p.caption || "")}"></label>
+      <label>Round<select name="match"><option value="">None</option>${rounds.map(m => `<option value="${m.id}" ${m.id === p.match_id ? "selected" : ""}>${fmtShort(m.scheduled_for)} · ${esc(splitName(m.course_name || "").base || "round")}</option>`).join("")}</select></label>
+      ${photoCourseField(p.course_name || "")}
+      <p class="hint">${fmtDate(p.taken_on)} · ${i + 1} of ${ph.length}</p>
+      <div class="acts"><button class="primary" type="submit">Save</button>${older ? `<button type="button" id="penext">Save & next ›</button>` : ""}<button type="button" data-back>Back</button></div>
+    </form>`, m => {
+    const f = $("#pef", m); wirePhotoCourse(f);
+    m.querySelector("[data-back]").onclick = () => photoView(id);
+    const go = async next => {
+      const mt = state.matches.find(x => x.id === f.match.value);
+      const row = { caption: f.caption.value.trim() || null, course_name: f.course.value.trim() || null, match_id: f.match.value || null };
+      if (mt && mt.id !== p.match_id) row.taken_on = mt.scheduled_for;
+      m.querySelectorAll("button").forEach(b => b.disabled = true);
+      try {
+        await save("photos", row, id);
+        if (DEMO) Object.assign(p, row); else await loadPhotos();
+        if (state.tab === "gallery") render();
+        next ? photoEdit(next) : photoView(id);
+        toast("Saved.");
+      } catch (err) { m.querySelectorAll("button").forEach(b => b.disabled = false); toast("Couldn't save: " + errMsg(err)); }
+    };
+    f.onsubmit = e => { e.preventDefault(); go(null); };
+    const nx = $("#penext", m); if (nx) nx.onclick = () => go(older);
   });
 }
 

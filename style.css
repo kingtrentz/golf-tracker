@@ -517,27 +517,31 @@ body::before {
 }
 html[data-theme="light"] body::before { opacity: .09; }
 @media (prefers-color-scheme: light) { html:not([data-theme="dark"]) body::before { opacity: .09; } }
-/* See-through cards so the crest shows across the page (not on Live or Gallery) */
-body[data-tab="card"]::before, body[data-tab="gallery"]::before { display: none; }
+/* See-through cards so the crest shows across the page (including Live Match Play; hidden on Gallery) */
+body[data-tab="gallery"]::before { display: none; }
 body::before { opacity: var(--crest-o, .13); }
 html[data-theme="light"] body::before { opacity: var(--crest-o, .15); }
 @media (prefers-color-scheme: light) { html:not([data-theme="dark"]) body::before { opacity: var(--crest-o, .15); } }
-body:not([data-tab="card"]):not([data-tab="gallery"]) #main :is(.card, .tile, .spot, .hero) { background-color: color-mix(in srgb, var(--surface) var(--glass, 72%), transparent); }
-body:not([data-tab="card"]):not([data-tab="gallery"]) #main .match { background-color: color-mix(in srgb, var(--surface-2) var(--glass, 72%), transparent); }
-body:not([data-tab="card"]):not([data-tab="gallery"]) #main :is(.champ, .spot.today) { background: radial-gradient(120% 140% at 0% 0%, var(--gold-glow) 0%, color-mix(in srgb, var(--surface) var(--glass, 72%), transparent) 60%); }
-/* Crest colors (Nov 23): oxblood header, warm charcoal, crest gold accents. Greens stay for good scores and wins. */
-:root {
-  --bg: #0f0d0d; --surface: #191515; --surface-2: #211c1c; --line: #342c2c;
-  --head-top: #3e0f17; --accent: #e2b53e; --on-accent: #1a1206; --on-accent-2: #4a3608;
+body:not([data-tab="gallery"]) #main :is(.card, .tile, .spot, .hero) { background-color: color-mix(in srgb, var(--surface) var(--glass, 78%), transparent); }
+body:not([data-tab="gallery"]) #main .match { background-color: color-mix(in srgb, var(--surface-2) var(--glass, 78%), transparent); }
+body:not([data-tab="gallery"]) #main :is(.champ, .spot.today) { background: radial-gradient(120% 140% at 0% 0%, var(--gold-glow) 0%, color-mix(in srgb, var(--surface) var(--glass, 78%), transparent) 60%); }
+/* Full-screen On-Course Live Match Play takeover */
+body[data-tab="card"] header,
+body[data-tab="card"] footer,
+body[data-tab="card"] #fab,
+body[data-tab="card"] #alerts { display: none !important; }
+body[data-tab="card"] main { padding-top: calc(env(safe-area-inset-top, 0px) + 10px); }
+.oc-menu { display: inline-flex; align-items: center; gap: 2px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--line); background: color-mix(in srgb, var(--surface-2) 85%, transparent); color: var(--text-2); font-size: 11.5px; font-weight: 600; text-decoration: none; flex: none; margin-right: 4px; }
+.oc-menu:active { opacity: .7; }
+.lt-course { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+body[data-tab="card"] .live-top .headline { text-align: center; text-wrap: balance; font-size: clamp(15px, 4.1vw, 20px); line-height: 1.25; margin-top: 8px; }
+body[data-tab="card"] .step { min-width: 56px; height: 56px; font-size: 28px; }
+body[data-tab="card"] .val { min-width: 58px; height: 56px; font-size: 26px; }
+/* Single deep-dark palette (no light/dark mode switch): deep obsidian, darker oxblood header, crest gold accents. */
+:root, html[data-theme="light"], html[data-theme="dark"] {
+  --bg: #080707; --surface: #110e0e; --surface-2: #181414; --line: #282121;
+  --head-top: #2b0910; --accent: #e2b53e; --on-accent: #1a1206; --on-accent-2: #4a3608;
 }
-html[data-theme="light"] {
-  --bg: #f6f2ea; --surface: #fffdf8; --surface-2: #f0eadf; --line: #e2d8c8;
-  --head-top: #f2d9d9; --accent: #c9961c; --on-accent: #1a1206; --on-accent-2: #4a3608;
-}
-@media (prefers-color-scheme: light) { html:not([data-theme="dark"]) {
-  --bg: #f6f2ea; --surface: #fffdf8; --surface-2: #f0eadf; --line: #e2d8c8;
-  --head-top: #f2d9d9; --accent: #c9961c; --on-accent: #1a1206; --on-accent-2: #4a3608;
-} }
 /* Home Screen app: alerts box, Updated line, pull to refresh */
 main { padding-bottom: 14px; }
 .alertsbox { max-width: 820px; margin: 0 auto; padding: 0 12px; }
@@ -561,12 +565,14 @@ button.upd { background: none; border: 0; padding: 2px 6px; color: var(--muted);
 html.app button.upd { cursor: pointer; text-decoration: underline dotted; }
 .ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 6px); transform: translate(-50%, -60px); z-index: 70; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 12.5px; font-weight: 700; box-shadow: 0 4px 14px var(--shadow); opacity: 0; transition: opacity .15s; pointer-events: none; }
 .ptr.on { opacity: 1; }
-/* GPS yardages on the hole screen */
-button.yds { display: inline-flex; align-items: baseline; gap: 8px; background: none; border: 0; padding: 2px 6px; margin-top: 1px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+/* One-tap on-demand GPS yardages button on the hole screen */
+button.yds { display: inline-flex; align-items: baseline; justify-content: center; gap: 8px; background: color-mix(in srgb, var(--surface-2) 85%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--line)); border-radius: 999px; padding: 6px 14px; margin-top: 6px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; cursor: pointer; }
+button.yds:active { transform: scale(.97); }
 button.yds b { font-size: 20px; font-weight: 800; color: var(--text); line-height: 1.1; }
 button.yds .ydf { font-size: 12.5px; color: var(--text-2); }
 button.yds .ydacc { font-size: 11px; color: var(--muted); }
-button.yds .ydoff { color: var(--accent); font-weight: 600; }
+button.yds .ydref { font-size: 13px; color: var(--accent); margin-left: 2px; }
+button.yds .ydoff { color: var(--accent); font-weight: 700; font-size: 13.5px; }
 button.yds .ydmsg { color: var(--muted); font-size: 12.5px; }
 /* Family-only gate: the whole site waits for the phrase */
 .gate { display: none; }

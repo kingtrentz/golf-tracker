@@ -2210,8 +2210,6 @@ document.addEventListener("click", e => {
     if (tb) { tb.textContent = t === "light" ? "☾" : "☀"; tb.title = t === "light" ? "Dark mode" : "Light mode"; }
     setThemeColor(t === "light" ? "#c3b090" : "#53275a");
     document.documentElement.style.backgroundColor = t === "light" ? "#dfd3be" : "#150c17";
-    const bar = $(".topbar");
-    if (bar) bar.style.backgroundColor = t === "light" ? "#8b7859" : "#53275a";
   };
   if ($("#themebtn")) {
     $("#themebtn").onclick = () => {
@@ -2618,17 +2616,17 @@ $("#al-off").addEventListener("click", async () => {
     root.classList.toggle("glide", mode === "glide");
     root.style.setProperty("--pull", p.toFixed(1) + "px");
     root.style.setProperty("--ptr-rot", (p * 2.2).toFixed(0) + "deg");
-    const k = Math.min(1, p / 65);
+    const k = Math.max(0, Math.min(1, (p - 16) / 68));
     ind.style.opacity = k.toFixed(2);
-    const y = Math.max(-34, p * 0.42 - 26);
-    ind.style.transform = `translate3d(-50%,${y.toFixed(1)}px,0) scale(${(0.72 + 0.34 * k).toFixed(3)})`;
+    const y = Math.max(-28, p * 0.46 - 28);
+    ind.style.transform = `translate3d(-50%,${y.toFixed(1)}px,0) scale(${(0.74 + 0.28 * k).toFixed(3)})`;
     if (mode && p === 0) settleTimer = setTimeout(() => { root.classList.remove("settle", "glide", "pulling"); ind.classList.remove("spin"); }, mode === "glide" ? 450 : 580);
   };
   const go = async () => {
     if (refreshing) return;
     refreshing = true;
     lbl.textContent = "Refreshing…"; ind.classList.add("spin");
-    setPull(96, "glide");
+    setPull(116, "glide");
     const minSpin = new Promise(r => setTimeout(r, 580));
     await Promise.all([minSpin, loadData().then(() => render()).catch(() => {})]);
     setPull(0, "glide");

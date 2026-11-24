@@ -1793,9 +1793,11 @@ function viewCard(id) {
     if (!idx.length) return "";
     const sum = arr => arr.reduce((a, b) => a + b, 0);
     return `<table class="sc"><thead><tr><th>${half === 0 ? "Out" : "In"}</th>${idx.map(i => `<th class="${ed && i === hole ? "cur" : ""}" ${ed ? `data-act="hole" data-v="${i}"` : ""}>${i + 1}</th>`).join("")}<th>Tot</th></tr>
-      <tr class="par"><td>Par</td>${idx.map(i => `<td>${card.pars[i]}</td>`).join("")}<td>${sum(idx.map(i => card.pars[i]))}</td></tr></thead>
+      <tr class="par"><td>Par</td>${idx.map(i => `<td>${card.pars[i]}</td>`).join("")}<td>${sum(idx.map(i => card.pars[i]))}</td></tr>
+      <tr class="hcp"><td>Hcp</td>${idx.map(i => `<td>${si[i]}</td>`).join("")}<td></td></tr></thead>
       <tbody>${card.players.map(s => { const v = holeVals(card, s); const got = idx.filter(i => v[i] != null);
-        return `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}</td>${idx.map(i => `<td class="${pops[s][i] > 0 ? "pop" : ""} ${wins[i] === s ? "won" : ""}"><span class="${v[i] == null ? "" : scoreCls(v[i], card.pars[i])}">${v[i] ?? ""}</span></td>`).join("")}<td><b>${got.length ? sum(got.map(i => v[i])) : ""}</b></td></tr>`; }).join("")}${two ? (() => { let up = 0; const run = card.pars.map((_, i) => { if (wins[i] === undefined) return null; up += wins[i] === two.a ? 1 : wins[i] === two.b ? -1 : 0; return up; });
+        const ch = cardCh(card, s), net = ch == null ? null : sum(got.map(i => v[i] - strokesOn(ch, si[i], n)));
+        return `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}${ch != null ? `<small class="sch">${ch}</small>` : ""}</td>${idx.map(i => `<td class="${pops[s][i] > 0 ? "pop" : ""} ${wins[i] === s ? "won" : ""}"><span class="${v[i] == null ? "" : scoreCls(v[i], card.pars[i])}">${v[i] ?? ""}</span></td>`).join("")}<td><b>${got.length ? sum(got.map(i => v[i])) : ""}</b>${got.length && net != null ? `<small class="snet">net ${net}</small>` : ""}</td></tr>`; }).join("")}${two ? (() => { let up = 0; const run = card.pars.map((_, i) => { if (wins[i] === undefined) return null; up += wins[i] === two.a ? 1 : wins[i] === two.b ? -1 : 0; return up; });
         return `<tr class="mrow"><td>Match</td>${idx.map(i => run[i] == null ? "<td></td>" : `<td><span class="ms" style="color:${run[i] ? P[run[i] > 0 ? two.a : two.b].color : "var(--muted)"}">${run[i] ? Math.abs(run[i]) : "AS"}</span></td>`).join("")}<td></td></tr>`; })() : ""}</tbody></table>`;
   };
   const hl = st.moments.filter(m => m.i < n || m.kind === "great");
@@ -1805,7 +1807,7 @@ function viewCard(id) {
   const endBtn = ed ? `<div class="endwrap"><button class="endbtn" data-act="finish" data-id="${id}">${card.players.every(p => cardTotals(card, p).done) ? "Submit round" : "End round"}</button></div>` : "";
   return `${ed ? status + entry + endBtn + lead : top + entry + endBtn}${betsBox(card)}${highlights}
   <section class="card"><h3>Scorecard</h3>${grid(0)}${grid(1)}
-    <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span><span><i class="popk"></i>stroke hole</span><span><i class="wonk"></i>won the hole</span></div></section>
+    <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span><span><i class="popk"></i>stroke hole</span><span>small number by a name = course handicap</span><span><i class="wonk"></i>won the hole</span></div></section>
   <div class="ed acts center"><button class="link" data-act="cardsc" data-id="${id}">Edit scorecard</button><button class="link" data-act="card-del" data-id="${id}">Delete scorecard</button></div>`;
 }
 const scoreCls = (v, par) => v < par - 1 ? "sc-e" : v === par - 1 ? "sc-b" : v === par ? "sc-p" : v === par + 1 ? "sc-o" : "sc-d";

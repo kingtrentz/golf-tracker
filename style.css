@@ -313,7 +313,7 @@ body.oncard .fab { display: none; }
 table.sc { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 12.5px; margin-bottom: 12px; font-variant-numeric: tabular-nums; }
 .sc th, .sc td { text-align: center; padding: 5px 0; border-bottom: 1px solid var(--line); }
 .sc th:first-child, .sc td:first-child { width: 22%; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sc th:last-child, .sc td:last-child { width: 10%; }
+.sc th:last-child, .sc td:last-child { width: 12%; }
 .sc th { color: var(--muted); font-weight: 600; }
 .sc th[data-act] { cursor: pointer; }
 .sc th.cur { color: var(--on-accent); background: var(--gold); border-radius: 6px; }
@@ -659,3 +659,8 @@ header .top { position: relative; justify-content: center; text-align: center; }
 header .top > div:first-child { padding: 0 44px; }
 header .topbtns { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
 header h1:has(.tw)::before { display: block; margin: 0 auto 3px; width: 40px; height: 20px; }
+
+/* Scorecard: hole handicap row, course handicap by each name, net under the total */
+.sc tr.hcp td { color: var(--muted); font-size: 10.5px; font-weight: 500; }
+.sc .sch { color: var(--muted); font-size: 10px; margin-left: 3px; font-weight: 600; }
+.sc .snet { display: block; color: var(--muted); font-size: 9.5px; font-weight: 600; white-space: nowrap; line-height: 1.1; }

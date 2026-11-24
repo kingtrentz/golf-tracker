@@ -2128,7 +2128,7 @@ document.addEventListener("click", e => {
   if (act === "money") moneyForm(state.matches.find(m => m.id === id));
   if (act === "course-sc") courseScorecard(id);
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
-  if (["hole", "sc", "par"].includes(act)) cardAction(act, b);
+  if (["hole", "sc", "par", "theme"].includes(act)) cardAction(act, b);
   if (act === "yds") ydToggle();
 });
 // Keep the Strokes section open or closed while the live card redraws.

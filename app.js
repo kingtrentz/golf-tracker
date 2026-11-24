@@ -1723,7 +1723,7 @@ function viewCard(id) {
 
   // Pieces of the top box, shared by the follow-along layout and the scoring layout.
   const chips = others.length ? `<div class="chips cardsw">${state.cards.map(c => `<a class="chip ${c.id === id ? "on" : ""}" href="#card/${c.id}">${esc(splitName(c.course_name).base)}</a>`).join("")}</div>` : "";
-  const meta = `<div class="lt-meta"><span class="pulse"></span><span>${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span class="lt-thru">${st.thruAll ? `thru ${st.thruAll}` : fmtShort(card.played_on)}</span></div>`;
+  const meta = `<div class="lt-meta"><a class="oc-menu" href="#h2h" aria-label="Back to menu">‹ Menu</a><span class="pulse"></span><span class="lt-course">${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span class="lt-thru">${st.thruAll ? `thru ${st.thruAll}` : fmtShort(card.played_on)}</span></div>`;
   const latest = st.moments[0] && st.thruAll && !st.head.startsWith(st.moments[0].text) ? `<div class="latest">Latest: ${esc(st.moments[0].text)}</div>` : "";
   const lboard = `<div class="lboard">${board.map(x => `<div class="lrow">
       <span class="lname">${dot(x.s)}${esc(pname(x.s))}${chip(x.s)}</span>
@@ -2158,23 +2158,9 @@ document.addEventListener("change", e => {
     sb = createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
   }
   $("#fab").onclick = addMenu;
-  // Light / dark: follows the phone until you tap the toggle, then remembers your pick.
-  const sysLight = matchMedia("(prefers-color-scheme: light)");
-  const themeNow = () => document.documentElement.dataset.theme || (sysLight.matches ? "light" : "dark");
-  const paintTheme = () => {
-    const t = themeNow();
-    $("#themebtn").textContent = t === "light" ? "☾" : "☀";
-    $("#themebtn").title = t === "light" ? "Dark mode" : "Light mode";
-    document.querySelector('meta[name="theme-color"]').content = t === "light" ? "#f2d9d9" : "#3e0f17";
-  };
-  $("#themebtn").onclick = () => {
-    const next = themeNow() === "light" ? "dark" : "light";
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("golf_theme", next); } catch (e) { /* private mode */ }
-    paintTheme();
-  };
-  sysLight.addEventListener?.("change", paintTheme);
-  paintTheme();
+  // Single deep-dark theme (no light/dark mode toggle).
+  document.documentElement.dataset.theme = "dark";
+  document.querySelector('meta[name="theme-color"]').content = "#2b0910";
   window.addEventListener("hashchange", route);
   let rz = null, lastW = innerWidth;
   window.addEventListener("resize", () => { clearTimeout(rz); rz = setTimeout(() => { if (Math.abs(innerWidth - lastW) > 40) { lastW = innerWidth; render(); } }, 250); });
@@ -2188,11 +2174,11 @@ document.addEventListener("change", e => {
   alertsInit(); // after the database client is ready
 })();
 
-// ---------- GPS yardages (front / middle / back of the green) ----------
-// Green outlines come from OpenStreetMap: greens.json for saved courses (tools/greens.py builds it,
-// matched hole by hole on number + par + hole handicap), otherwise the phone asks OpenStreetMap
-// itself the first time and keeps the answer. Only runs while the Live tab is open and yardages are on.
-const yd = { on: localStorage.getItem("golf_gps") === "1", pos: null, err: "", watch: null, file: null, live: {}, asked: {} };
+// ---------- GPS yardages (one-tap on-demand front / middle / back of the green) ----------
+// Green outlines come from OpenStreetMap: greens.json for saved courses (tools/greens.py builds it),
+// otherwise the phone asks OpenStreetMap itself the first time and keeps the answer.
+// One-tap "call it up" mode: pulls a fresh GPS fix on demand when tapped (no battery-draining background watch).
+const yd = { on: false, busy: false, pos: null, err: "", file: null, live: {}, asked: {} };
 const M2Y = 1.09361;
 function ydLoadFile() {
   if (yd.file) return;
@@ -2262,34 +2248,34 @@ function ydNumbers(pos, g) {
   return { mid, front: ts.length ? Math.min(...ts) : mid, back: ts.length ? Math.max(...ts) : mid };
 }
 function ydText(card, hole) {
-  if (!yd.on) return `<span class="ydoff">📍 Yardages</span>`;
+  if (yd.busy) return `<span class="ydmsg">📍 Pulling GPS…</span>`;
+  if (!yd.on) return `<span class="ydoff">📍 Get Yardage</span>`;
   const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
   if (yd.err) return `<span class="ydmsg">${esc(yd.err)}</span>`;
   if (!h) return `<span class="ydmsg">${holes || (yd.file && !yd.asked[card.course_name]) ? "No yardage for this hole" : "Loading greens…"}</span>`;
-  if (!yd.pos) return `<span class="ydmsg">Finding you…</span>`;
+  if (!yd.pos) return `<span class="ydoff">📍 Get Yardage</span>`;
   const n = ydNumbers([yd.pos.lat, yd.pos.lng], h.g), y = m => Math.round(m * M2Y);
-  if (n.on) return `<span class="ydmsg">On the green</span>`;
-  if (y(n.mid) > 700) return `<span class="ydmsg">Not near hole ${hole + 1}</span>`;
+  if (n.on) return `<span class="ydmsg">On the green ↻</span>`;
+  if (y(n.mid) > 700) return `<span class="ydmsg">Not near hole ${hole + 1} ↻</span>`;
   const acc = yd.pos.acc > 18 ? `<span class="ydacc">±${Math.round(yd.pos.acc * M2Y)}</span>` : "";
-  return `<span class="ydf">F ${y(n.front)}</span><b>${y(n.mid)}</b><span class="ydf">B ${y(n.back)}</span>${acc}`;
+  return `<span class="ydf">F ${y(n.front)}</span><b>${y(n.mid)}</b><span class="ydf">B ${y(n.back)}</span>${acc}<span class="ydref" aria-hidden="true">↻</span>`;
 }
 function ydPaint() {
   document.querySelectorAll("[data-yds]").forEach(el => { const [id, h] = el.dataset.yds.split(":"); const card = cardById(id); if (card) el.innerHTML = ydText(card, +h); });
 }
 function ydSync() {
-  const want = yd.on && state.tab === "card" && !document.hidden && "geolocation" in navigator;
-  if (want) ydLoadFile();
-  if (want && yd.watch == null) {
-    yd.watch = navigator.geolocation.watchPosition(p => { yd.err = ""; yd.pos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }; ydPaint(); },
-      e => { yd.err = e.code === 1 ? "Location is blocked. Allow it in Settings, Privacy, Location Services, Safari Websites." : ""; ydPaint(); },
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
-  } else if (!want && yd.watch != null) { navigator.geolocation.clearWatch(yd.watch); yd.watch = null; }
+  if (state.tab === "card") ydLoadFile();
 }
 function ydToggle() {
-  yd.on = !yd.on; yd.err = "";
-  try { localStorage.setItem("golf_gps", yd.on ? "1" : "0"); } catch (e) { /* private mode */ }
-  if (!yd.on) { yd.pos = null; for (const k of Object.keys(yd.live)) if (!Object.keys(yd.live[k] || {}).length) { delete yd.live[k]; delete yd.asked[k]; } }
-  ydSync(); ydPaint();
+  yd.on = true; yd.err = ""; yd.busy = true;
+  ydLoadFile();
+  ydPaint();
+  if (!("geolocation" in navigator)) { yd.busy = false; yd.err = "GPS not supported on this device"; ydPaint(); return; }
+  navigator.geolocation.getCurrentPosition(
+    p => { yd.busy = false; yd.err = ""; yd.pos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }; ydPaint(); },
+    e => { yd.busy = false; yd.err = e.code === 1 ? "Location blocked — allow in Safari Settings" : "Could not get GPS — tap to retry"; ydPaint(); },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+  );
 }
 document.addEventListener("visibilitychange", () => ydSync());
 

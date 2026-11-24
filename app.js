@@ -2394,7 +2394,9 @@ function ydHoleSvg(card, hole) {
   </svg>`;
 }
 // Hand-entered shapes for holes the map data can't see (no fairway outline). Trent's calls.
-const HOLE_SHAPE = { "CrossWinds Golf Course": { 4: "Dogleg left" } };
+// Map fairway outlines aren't reliable enough to call doglegs on their own (offset tees and shared fairways
+// read as bends), so shape only comes from here: checked against the official layout and Trent's calls.
+const HOLE_SHAPE = { "CrossWinds Golf Course": { 1: "Dogleg left", 4: "Dogleg left" } };
 // Caddy note: one line per hole from the course outline data (OpenStreetMap): shape, water, sand.
 // Distances are yards from the tee along the line to the middle of the green. No club advice.
 function ydHoleNote(card, hole) {
@@ -2417,7 +2419,7 @@ function ydHoleNote(card, hole) {
   // Shape: where the fairway bends away from the straight line (a hand-entered shape wins)
   const fixShape = HOLE_SHAPE[card.course_name]?.[hole + 1];
   if (fixShape) bits.push(fixShape);
-  else if (par >= 4 && h.fw?.length) {
+  else if (false && par >= 4 && h.fw?.length) { // auto shape off: see HOLE_SHAPE
     const pts = h.fw.flatMap(poly => poly.map(rel)).filter(x => x.a > L * 0.25 && x.a < L * 0.8);
     if (pts.length) {
       // The fairway bulges out on the far side of the straight line: bulge right = dogleg left.

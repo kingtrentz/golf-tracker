@@ -2670,3 +2670,62 @@ $("#al-off").addEventListener("click", async () => {
   document.addEventListener("visibilitychange", () => { if (document.hidden) away = Date.now(); else if (away && Date.now() - away > 5 * 60000 && $("#modal").hidden) location.reload(); });
   if (state.updatedAt) stampUpd();
 })();
+
+// ---------- Return-to-top button + deep-bottom scroll-resistance Easter egg ----------
+(() => {
+  const topBtn = $("#totop"), hint = $("#abyss-hint"), rev = $("#abyss-reveal"), abyssTop = $(".abyss-top");
+  if (!topBtn || !hint || !rev) return;
+  let charge = 0, opened = false, cool = 0, ty = null;
+  const GOAL = 320;
+  const atBottom = () => window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 16;
+  const onCard = () => document.body.dataset.tab === "card";
+  const paintTop = () => {
+    topBtn.hidden = onCard() || (window.scrollY < 260 && !opened);
+  };
+  const backToTop = () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (opened) {
+      setTimeout(() => {
+        opened = false; charge = 0;
+        rev.hidden = true; hint.textContent = ""; hint.classList.remove("show");
+        paintTop();
+      }, 450);
+    }
+  };
+  topBtn.onclick = backToTop;
+  if (abyssTop) abyssTop.onclick = backToTop;
+  addEventListener("scroll", paintTop, { passive: true });
+  addEventListener("hashchange", () => { opened = false; charge = 0; rev.hidden = true; hint.textContent = ""; hint.classList.remove("show"); paintTop(); });
+
+  const pushResistance = delta => {
+    if (opened || onCard() || !$("#modal").hidden || !atBottom()) return;
+    charge = Math.min(GOAL, charge + delta * 0.45); // heavy resistance
+    clearTimeout(cool);
+    if (charge >= GOAL) {
+      opened = true;
+      hint.textContent = ""; hint.classList.remove("show");
+      rev.hidden = false;
+      paintTop();
+      setTimeout(() => rev.scrollIntoView({ behavior: "smooth", block: "center" }), 60);
+      return;
+    }
+    const pct = charge / GOAL;
+    if (pct > 0.2) {
+      hint.textContent = pct < 0.55 ? "Nothing down here…" : pct < 0.85 ? "Seriously, stop scrolling…" : "One more push…";
+      hint.classList.add("show");
+    }
+    cool = setTimeout(() => {
+      if (!opened) { charge = 0; hint.textContent = ""; hint.classList.remove("show"); }
+    }, 1800);
+  };
+
+  addEventListener("wheel", e => { if (e.deltaY > 0) pushResistance(e.deltaY); }, { passive: true });
+  addEventListener("touchstart", e => { ty = e.touches.length === 1 ? e.touches[0].clientY : null; }, { passive: true });
+  addEventListener("touchmove", e => {
+    if (ty === null) return;
+    const dy = ty - e.touches[0].clientY;
+    ty = e.touches[0].clientY;
+    if (dy > 0) pushResistance(dy);
+  }, { passive: true });
+  addEventListener("touchend", () => { ty = null; }, { passive: true });
+})();

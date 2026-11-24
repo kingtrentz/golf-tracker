@@ -2209,6 +2209,9 @@ document.addEventListener("click", e => {
     const tb = $("#themebtn");
     if (tb) { tb.textContent = t === "light" ? "☾" : "☀"; tb.title = t === "light" ? "Dark mode" : "Light mode"; }
     setThemeColor(t === "light" ? "#c3b090" : "#53275a");
+    document.documentElement.style.backgroundColor = t === "light" ? "#dfd3be" : "#150c17";
+    const bar = $(".topbar");
+    if (bar) bar.style.backgroundColor = t === "light" ? "#8b7859" : "#53275a";
   };
   if ($("#themebtn")) {
     $("#themebtn").onclick = () => {
@@ -2216,8 +2219,6 @@ document.addEventListener("click", e => {
       document.documentElement.dataset.theme = next;
       try { localStorage.setItem("golf_theme", next); } catch (e) { /* private mode */ }
       paintTheme();
-      // Force iOS WebKit compositor repaint of the safe-area top band without needing a reload.
-      requestAnimationFrame(() => { document.documentElement.style.backgroundColor = getComputedStyle(document.documentElement).getPropertyValue("--bg"); });
     };
   }
   paintTheme();
@@ -2609,7 +2610,10 @@ $("#al-off").addEventListener("click", async () => {
   const lbl = ind.querySelector("span"), root = document.documentElement;
   const busy = () => !$("#modal").hidden || document.body.dataset.tab === "card";
   const LINE = 105;
+  let settleTimer = 0;
   const setPull = (p, mode) => {
+    clearTimeout(settleTimer);
+    root.classList.toggle("pulling", !mode && p > 0);
     root.classList.toggle("settle", !!mode);
     root.style.setProperty("--pull", p.toFixed(1) + "px");
     root.style.setProperty("--ptr-rot", (p * 2.2).toFixed(0) + "deg");
@@ -2617,11 +2621,12 @@ $("#al-off").addEventListener("click", async () => {
     ind.style.opacity = k.toFixed(2);
     const y = Math.max(-34, p * 0.42 - 26);
     ind.style.transform = `translate3d(-50%,${y.toFixed(1)}px,0) scale(${(0.72 + 0.34 * k).toFixed(3)})`;
+    if (mode && p === 0) settleTimer = setTimeout(() => root.classList.remove("settle", "pulling"), 620);
   };
   const go = () => {
     lbl.textContent = "Refreshing…"; ind.classList.add("spin");
-    setPull(92, true);
-    setTimeout(() => { setPull(0, true); setTimeout(() => location.reload(), 420); }, 460);
+    setPull(96, true);
+    setTimeout(() => { setPull(0, true); setTimeout(() => location.reload(), 640); }, 520);
   };
   let y0 = null, d = 0, raf = 0, armed = null;
   const paint = () => {
@@ -2635,7 +2640,7 @@ $("#al-off").addEventListener("click", async () => {
     if (a !== armed) { armed = a; lbl.textContent = a ? "Let go to refresh" : "Pull to refresh"; }
   };
   addEventListener("touchstart", e => {
-    y0 = (scrollY <= 0 && e.touches.length === 1 && !busy() && !e.target.closest("canvas,input,textarea,select,.tabs,.lpic")) ? e.touches[0].clientY : null; d = 0; armed = null;
+    y0 = (scrollY <= 2 && e.touches.length === 1 && !busy() && !e.target.closest("canvas,input,textarea,select,.tabs,.lpic")) ? e.touches[0].clientY : null; d = 0; armed = null;
   }, { passive: true });
   addEventListener("touchmove", e => {
     if (y0 === null) return;

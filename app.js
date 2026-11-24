@@ -2839,7 +2839,7 @@ const inApp = () => matchMedia("(display-mode: standalone)").matches || navigato
 const PUSH_FN = DEMO ? null : `${CFG.supabaseUrl}/functions/v1/push`;
 let SWREG = null, VAPID = null;
 const unb64u = s => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)), c => c.charCodeAt(0));
-const AL_IDS = { start: "al-start", end: "al-end" };
+const AL_IDS = { start: "al-start", end: "al-end", own: "al-own" };
 const HOLES_HINT = { off: "No hole alerts.", big: "Only when it matters: lead changes, the match squared, dormie, match decided, birdie or better.", all: "Every hole: who won it, match status, birdies, blowups." };
 const alState = () => { try { return JSON.parse(localStorage.getItem("golf_alerts") || "null"); } catch (e) { return null; } };
 const alSave = v => { try { localStorage.setItem("golf_alerts", JSON.stringify(v)); } catch (e) { /* private mode */ } };
@@ -2849,7 +2849,7 @@ function paintMe() {
   $("#al-hhint").textContent = HOLES_HINT[alHoles];
   $("#al-me").innerHTML = [...PLAYERS.map(p => [p.slug, p.name]), [null, "Just watching"]].map(([s, n]) =>
     `<button type="button" data-me="${s ?? ""}" class="${(alMe ?? "") === (s ?? "") ? "on" : ""}">${s ? dot(s) : ""}${esc(n)}</button>`).join("");
-  $("#al-mehint").hidden = !alMe;
+  const ownWrap = $("#al-own-wrap"); if (ownWrap) ownWrap.hidden = !alMe;
 }
 async function alertsUI() {
   const sec = $("#alerts"); if (!sec || !VAPID) return;
@@ -2870,7 +2870,7 @@ async function alertsUI() {
   $("#al-off").hidden = !on;
   $("#alerts-sum").textContent = on ? "On" + (alMe ? " · " + pname(alMe) : "") : "Phone and watch";
   // Keep the server's copy fresh (phones rotate subscriptions now and then); once a day is plenty.
-  if (on && sb && Date.now() - (st.synced || 0) > 864e5) sb.rpc("gt_push_sub", { op: "sub", sub: sub.toJSON(), prefs: st.p, me: st.me ?? null })
+  if (on && sb && Date.now() - (st.synced || 0) > 864e5) sb.rpc("gt_push_sub", { op: "sub", sub: sub.toJSON(), prefs: st.p, me: st.p?.own !== false ? null : (st.me ?? null) })
     .then(({ error }) => { if (!error) alSave({ ...st, synced: Date.now() }); });
 }
 async function alertsInit() {
@@ -2891,7 +2891,7 @@ $("#alerts-form").addEventListener("submit", async e => {
     if (perm !== "granted") { note.textContent = "Notifications weren't allowed. Turn them on in Settings, Notifications, Golf."; btn.disabled = false; return; }
     note.textContent = "Saving…";
     const sub = await SWREG.pushManager.getSubscription() || await SWREG.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64u(VAPID) });
-    const { error } = await sb.rpc("gt_push_sub", { op: "sub", sub: sub.toJSON(), prefs: p, me: alMe });
+    const { error } = await sb.rpc("gt_push_sub", { op: "sub", sub: sub.toJSON(), prefs: p, me: p.own ? null : alMe });
     if (error) throw error;
     const was = alState();
     alSave({ on: true, p, me: alMe, synced: Date.now() });

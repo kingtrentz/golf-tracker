@@ -1723,7 +1723,8 @@ function viewCard(id) {
 
   // Pieces of the top box, shared by the follow-along layout and the scoring layout.
   const chips = others.length ? `<div class="chips cardsw">${state.cards.map(c => `<a class="chip ${c.id === id ? "on" : ""}" href="#card/${c.id}">${esc(splitName(c.course_name).base)}</a>`).join("")}</div>` : "";
-  const meta = `<div class="lt-meta"><a class="oc-menu" href="#h2h" aria-label="Back to menu">‹ Menu</a><span class="pulse"></span><span class="lt-course">${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span class="lt-thru">${st.thruAll ? `thru ${st.thruAll}` : fmtShort(card.played_on)}</span></div>`;
+  const isLight = document.documentElement.dataset.theme === "light";
+  const meta = `<div class="lt-meta"><a class="oc-menu" href="#h2h" aria-label="Back to menu">‹ Menu</a><button type="button" class="oc-menu oc-theme" data-act="theme" aria-label="Switch light or dark mode">${isLight ? "☾" : "☀"}</button><span class="pulse"></span><span class="lt-course">${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span class="lt-thru">${st.thruAll ? `thru ${st.thruAll}` : fmtShort(card.played_on)}</span></div>`;
   const latest = st.moments[0] && st.thruAll && !st.head.startsWith(st.moments[0].text) ? `<div class="latest">Latest: ${esc(st.moments[0].text)}</div>` : "";
   const lboard = `<div class="lboard">${board.map(x => `<div class="lrow">
       <span class="lname">${dot(x.s)}${esc(pname(x.s))}${chip(x.s)}</span>
@@ -1799,6 +1800,7 @@ function firstOpenHole(card) {
 }
 
 function cardAction(act, b) {
+  if (act === "theme") { $("#themebtn")?.click(); render(); return; }
   const id = state.cardId; const card = cardById(id); if (!card) return;
   if (act === "hole") { clearTimeout(cardAction._adv); localStorage.setItem("golf_hole_" + id, b.dataset.v); render(); return; }
   if (!editing()) return phraseForm();

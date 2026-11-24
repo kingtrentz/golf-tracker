@@ -529,8 +529,8 @@ body { background: transparent; }
   opacity: var(--crest-o, .2);
   user-select: none; -webkit-user-select: none;
 }
-html[data-theme="light"] .watermark img { opacity: var(--crest-o, .22); }
-@media (prefers-color-scheme: light) { html:not([data-theme="dark"]) .watermark img { opacity: var(--crest-o, .22); } }
+html[data-theme="light"] .watermark img { opacity: var(--crest-o, .34); filter: contrast(1.06) brightness(.94); }
+@media (prefers-color-scheme: light) { html:not([data-theme="dark"]) .watermark img { opacity: var(--crest-o, .34); filter: contrast(1.06) brightness(.94); } }
 /* See-through cards so the crest shows across the page (including Live Match Play; hidden on Gallery) */
 body[data-tab="gallery"] .watermark { display: none; }
 #demo, main, .alertsbox, footer { position: relative; z-index: 2; }

@@ -427,6 +427,7 @@ function render() {
   document.body.classList.toggle("editing", editing());
   document.body.classList.toggle("oncard", tab === "card");
   ydSync();
+  satPaint();
 }
 
 function statTile(label, value, sub = "") {
@@ -1775,7 +1776,6 @@ function viewCard(id) {
           <div class="popline">${wins[hole] !== undefined ? (wins[hole] ? `<span class="hwin">${esc(pname(wins[hole]))} wins the hole</span>` : `<span class="hhalf">Hole halved</span>`) : ""}${(() => { if (wins[hole] !== undefined) return ""; const g = card.players.filter(p => pops[p][hole] > 0); return card.players.length < 2 ? "" : g.length ? `${g.map(p => esc(pname(p))).join(" & ")} ${g.length > 1 ? "stroke" : "strokes"} here` : "No strokes here"; })()}</div></div>
         <button class="nav" data-act="hole" data-v="${hole + 1}" ${hole === n - 1 ? "disabled" : ""} aria-label="Next hole">›</button>
       </div>
-      <div class="hnote" data-hnote="${id}:${hole}">${ydHoleNote(card, hole)}</div>
       ${card.players.map(s => {
         const v = holeVals(card, s)[hole];
         const pop = pops[s][hole]; const hp = st.pts[s].per[hole];
@@ -1786,6 +1786,13 @@ function viewCard(id) {
           <button class="step" data-act="sc" data-s="${s}" data-d="1" aria-label="${esc(pname(s))} one more">+</button>
         </div>`;
       }).join("")}
+      <div class="satwrap" data-sat="${id}:${hole}" hidden>
+        <canvas class="satcv"></canvas>
+        <span class="sathint">Drag to measure</span>
+        <button type="button" class="satbtn satclr" aria-label="Clear target" hidden>✕</button>
+        <button type="button" class="satbtn satexp" aria-label="Expand hole map">⤢</button>
+      </div>
+      <div class="hnote" data-hnote="${id}:${hole}">${ydHoleNote(card, hole)}</div>
       <div class="hfoot"><span><span id="savestate" class="savestate"></span><span id="autoadv" class="autoadv"></span></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Submit round</button>`}</div>
       <p class="hint">Tap the number for par, − and + for anything else. Once everyone has a score it moves to the next hole.</p>
     </section>` : `<p class="hint center">Updates by itself. Tap Enter scores to keep score.</p>`;
@@ -2472,6 +2479,218 @@ function ydPaint() {
   document.querySelectorAll("[data-yds]").forEach(el => { const [id, h] = el.dataset.yds.split(":"); const card = cardById(id); if (card) el.innerHTML = ydText(card, +h); });
   document.querySelectorAll("[data-ryds]").forEach(el => { const [id, h] = el.dataset.ryds.split(":"); const card = cardById(id); if (card) el.textContent = ydRoughText(card, +h); });
   document.querySelectorAll("[data-hnote]").forEach(el => { const [id, h] = el.dataset.hnote.split(":"); const card = cardById(id); if (card) el.innerHTML = ydHoleNote(card, +h); });
+  satPaint();
+}
+
+// ---------- Interactive Esri satellite hole map (inline drag-to-measure + optional blow-up) ----------
+const satTiles = new Map(), satBases = new Map(), satTap = {};
+const satToMerc = (lat, lng, z) => {
+  const s = 256 * Math.pow(2, z), rad = lat * Math.PI / 180;
+  return [((lng + 180) / 360) * s, (1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * s];
+};
+const satToLatLng = (x, y, z) => {
+  const s = 256 * Math.pow(2, z), n = Math.PI - (2 * Math.PI * y) / s;
+  return [(180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n))), (x / s) * 360 - 180];
+};
+function satGetTile(z, x, y) {
+  const k = `${z}/${y}/${x}`;
+  if (satTiles.has(k)) return satTiles.get(k);
+  const p = new Promise(res => {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => res(img);
+    img.onerror = () => res(null);
+    img.src = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`;
+  });
+  satTiles.set(k, p);
+  return p;
+}
+function satGeom(h, W, H, horiz) {
+  const gc = ydGreenCenter(h.g), t = h.t;
+  const totalYds = Math.round(ydDist(t, gc) * M2Y);
+  const z = totalYds > 430 ? 17 : 18;
+  const [tx, ty] = satToMerc(t[0], t[1], z), [gx, gy] = satToMerc(gc[0], gc[1], z);
+  const dx = gx - tx, dy = gy - ty, len = Math.max(10, Math.hypot(dx, dy));
+  const midMx = (tx + gx) / 2, midMy = (ty + gy) / 2;
+  const span = horiz ? (W - 76) : (H - 124);
+  const scale = Math.min(span / len, horiz ? 1.15 : 1.45);
+  const rot = horiz ? -Math.atan2(dy, dx) : (-Math.PI / 2 - Math.atan2(dy, dx));
+  const cx = W / 2, cy = horiz ? H / 2 : (H / 2 + 4);
+  const cr = Math.cos(rot), sr = Math.sin(rot);
+  const toScr = (mx, my) => { const rx = mx - midMx, ry = my - midMy; return [cx + (rx * cr - ry * sr) * scale, cy + (rx * sr + ry * cr) * scale]; };
+  const toMerc = (sx, sy) => { const vx = (sx - cx) / scale, vy = (sy - cy) / scale; return [midMx + (vx * cr + vy * sr), midMy + (-vx * sr + vy * cr)]; };
+  return { gc, t, totalYds, z, tx, ty, gx, gy, midMx, midMy, scale, rot, cx, cy, toScr, toMerc };
+}
+async function satBase(key, h, W, H, horiz) {
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const bk = `${key}:${horiz ? "h" : "v"}:${Math.round(W)}x${Math.round(H)}`;
+  if (satBases.has(bk)) return satBases.get(bk);
+  const G = satGeom(h, W, H, horiz);
+  const corners = [[0, 0], [W, 0], [0, H], [W, H]].map(([sx, sy]) => G.toMerc(sx, sy));
+  const minTx = Math.floor(Math.min(...corners.map(p => p[0])) / 256);
+  const maxTx = Math.floor(Math.max(...corners.map(p => p[0])) / 256);
+  const minTy = Math.floor(Math.min(...corners.map(p => p[1])) / 256);
+  const maxTy = Math.floor(Math.max(...corners.map(p => p[1])) / 256);
+  const jobs = [];
+  for (let x = minTx; x <= maxTx; x++) for (let y = minTy; y <= maxTy; y++) jobs.push(satGetTile(G.z, x, y).then(img => ({ img, x, y })));
+  const tiles = await Promise.all(jobs);
+  const off = document.createElement("canvas");
+  off.width = Math.round(W * dpr); off.height = Math.round(H * dpr);
+  const ctx = off.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.fillStyle = "#161d17"; ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.translate(G.cx, G.cy); ctx.scale(G.scale, G.scale); ctx.rotate(G.rot); ctx.translate(-G.midMx, -G.midMy);
+  for (const ti of tiles) if (ti.img) ctx.drawImage(ti.img, ti.x * 256, ti.y * 256, 256.5, 256.5);
+  ctx.restore();
+  const vig = ctx.createRadialGradient(G.cx, G.cy, Math.min(W, H) * 0.25, G.cx, G.cy, Math.max(W, H) * 0.75);
+  vig.addColorStop(0, "rgba(0,0,0,0)"); vig.addColorStop(1, "rgba(15,8,18,0.4)");
+  ctx.fillStyle = vig; ctx.fillRect(0, 0, W, H);
+  const entry = { off, G, dpr, W, H };
+  if (satBases.size > 24) satBases.delete(satBases.keys().next().value);
+  satBases.set(bk, entry);
+  return entry;
+}
+function satDrawOverlay(cv, base, tap, horiz) {
+  const { off, G, dpr, W, H } = base;
+  if (cv.width !== off.width || cv.height !== off.height) { cv.width = off.width; cv.height = off.height; }
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(off, 0, 0);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  // Measure from live GPS if on the hole (< 700 yds from green), otherwise from the tee.
+  const gpsNear = yd.pos && ydDist([yd.pos.lat, yd.pos.lng], G.gc) * M2Y < 700 ? [yd.pos.lat, yd.pos.lng] : null;
+  const origin = gpsNear || G.t;
+  const [omx, omy] = satToMerc(origin[0], origin[1], G.z);
+  const [osx, osy] = G.toScr(omx, omy);
+  const [tsx, tsy] = G.toScr(G.tx, G.ty);
+  const [gsx, gsy] = G.toScr(G.gx, G.gy);
+
+  const drawPill = (x, y, text, accent) => {
+    ctx.save();
+    ctx.font = `700 ${horiz ? 11 : 12}px -apple-system, BlinkMacSystemFont, sans-serif`;
+    const tw = ctx.measureText(text).width, pw = tw + 14, ph = horiz ? 20 : 22, r = ph / 2;
+    const maxRight = horiz ? W - 42 : W - 8;
+    const px = Math.max(8, Math.min(maxRight - pw, x - pw / 2));
+    const py = Math.max(6, Math.min(H - ph - 6, y - ph / 2));
+    ctx.fillStyle = accent ? "rgba(191,164,120,0.96)" : "rgba(21,12,23,0.88)";
+    ctx.strokeStyle = accent ? "#1a120a" : "rgba(191,164,120,0.78)";
+    ctx.lineWidth = 1.25;
+    ctx.beginPath(); ctx.roundRect(px, py, pw, ph, r); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = accent ? "#1a120a" : "#f5efe4";
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(text, px + pw / 2, py + ph / 2 + 0.5);
+    ctx.restore();
+  };
+
+  if (tap) {
+    const [pmx, pmy] = satToMerc(tap[0], tap[1], G.z);
+    const [psx, psy] = G.toScr(pmx, pmy);
+    const d1 = Math.round(ydDist(origin, tap) * M2Y);
+    const d2 = Math.round(ydDist(tap, G.gc) * M2Y);
+    ctx.save();
+    ctx.strokeStyle = "rgba(245,239,228,0.94)"; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(osx, osy); ctx.lineTo(psx, psy); ctx.lineTo(gsx, gsy); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath(); ctx.arc(psx, psy, horiz ? 11 : 14, 0, Math.PI * 2);
+    ctx.strokeStyle = "#bfa478"; ctx.lineWidth = 2.2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(psx, psy, 3.6, 0, Math.PI * 2);
+    ctx.fillStyle = "#f5efe4"; ctx.fill();
+    ctx.restore();
+    if (horiz) {
+      const above = psy > H * 0.52 ? -22 : 22;
+      drawPill((osx + psx) / 2, Math.max(16, Math.min(H - 16, (osy + psy) / 2 + above)), `${d1} yds`, false);
+      drawPill((psx + gsx) / 2, Math.max(16, Math.min(H - 16, (psy + gsy) / 2 - above * 0.85)), `${d2} pin`, true);
+    } else {
+      drawPill((osx + psx) / 2 + 28, (osy + psy) / 2, `${d1} yds`, false);
+      drawPill((psx + gsx) / 2 + 28, (psy + gsy) / 2, `${d2} to pin`, true);
+    }
+  } else {
+    ctx.save();
+    ctx.strokeStyle = "rgba(245,239,228,0.65)"; ctx.lineWidth = 1.8; ctx.setLineDash([5, 5]);
+    ctx.beginPath(); ctx.moveTo(osx, osy); ctx.lineTo(gsx, gsy); ctx.stroke();
+    ctx.restore();
+    if (!horiz) drawPill((osx + gsx) / 2, (osy + gsy) / 2, `${Math.round(ydDist(origin, G.gc) * M2Y)} yds`, false);
+  }
+
+  // Tee dot
+  ctx.save();
+  ctx.beginPath(); ctx.arc(tsx, tsy, 5, 0, Math.PI * 2);
+  ctx.fillStyle = "#bfa478"; ctx.fill(); ctx.lineWidth = 1.8; ctx.strokeStyle = "#150c17"; ctx.stroke();
+  // Live GPS player dot when on the hole
+  if (gpsNear) {
+    ctx.beginPath(); ctx.arc(osx, osy, 9, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(77,163,255,0.28)"; ctx.fill();
+    ctx.beginPath(); ctx.arc(osx, osy, 5, 0, Math.PI * 2);
+    ctx.fillStyle = "#4da3ff"; ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = "#ffffff"; ctx.stroke();
+  }
+  // Green pin dot + ring
+  ctx.beginPath(); ctx.arc(gsx, gsy, 9.5, 0, Math.PI * 2);
+  ctx.strokeStyle = "rgba(191,164,120,0.88)"; ctx.lineWidth = 1.6; ctx.stroke();
+  ctx.beginPath(); ctx.arc(gsx, gsy, 4, 0, Math.PI * 2);
+  ctx.fillStyle = "#f5efe4"; ctx.fill();
+  ctx.restore();
+}
+function satWireDrag(cv, base, key, horiz, onUpdate) {
+  let dragging = false;
+  const pick = e => {
+    const r = cv.getBoundingClientRect();
+    const sx = Math.max(4, Math.min(r.width - 4, e.clientX - r.left));
+    const sy = Math.max(4, Math.min(r.height - 4, e.clientY - r.top));
+    const [mx, my] = base.G.toMerc(sx, sy);
+    satTap[key] = satToLatLng(mx, my, base.G.z);
+    satDrawOverlay(cv, base, satTap[key], horiz);
+    onUpdate?.();
+  };
+  cv.onpointerdown = e => { dragging = true; cv.setPointerCapture?.(e.pointerId); pick(e); };
+  cv.onpointermove = e => { if (dragging) pick(e); };
+  cv.onpointerup = cv.onpointercancel = () => { dragging = false; };
+}
+function openSatModal(card, hole) {
+  const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
+  if (!h?.t || !h?.g?.length) return;
+  const key = card.id + ":" + hole;
+  const rough = ydRoughText(card, hole);
+  openModal(`<div class="sat-sheet">
+    <h2>Hole ${hole + 1} · Par ${card.pars[hole]}${rough}</h2>
+    <p class="hint" style="margin:0 0 10px">Tap or drag anywhere on the fairway, water, or bunkers to measure.</p>
+    <div class="sat-fullbox">
+      <canvas class="sat-fullcv" id="satfull"></canvas>
+      <button type="button" class="satbtn satclr" id="satmclr" aria-label="Clear target" ${satTap[key] ? "" : "hidden"}>✕</button>
+    </div>
+    <div class="sat-foot"><span>${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span>Imagery © Esri</span></div>
+  </div>`, async m => {
+    const cv = $("#satfull", m), clr = $("#satmclr", m);
+    const W = cv.clientWidth || 340, H = cv.clientHeight || 460;
+    const base = await satBase(`${card.course_name}:${hole + 1}`, h, W, H, false);
+    if (!cv.isConnected) return;
+    satDrawOverlay(cv, base, satTap[key], false);
+    const sync = () => { clr.hidden = !satTap[key]; satPaint(); };
+    satWireDrag(cv, base, key, false, sync);
+    clr.onclick = () => { delete satTap[key]; satDrawOverlay(cv, base, null, false); sync(); };
+  });
+}
+function satPaint() {
+  document.querySelectorAll("[data-sat]").forEach(async wrap => {
+    const [id, hIdx] = wrap.dataset.sat.split(":");
+    const hole = +hIdx, card = cardById(id);
+    if (!card) return;
+    const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
+    if (!h?.t || !h?.g?.length) { wrap.hidden = true; return; }
+    wrap.hidden = false;
+    const cv = $(".satcv", wrap), clr = $(".satclr", wrap), exp = $(".satexp", wrap), hint = $(".sathint", wrap);
+    const key = id + ":" + hole;
+    const W = cv.clientWidth || Math.min(360, innerWidth - 52), H = cv.clientHeight || 118;
+    const base = await satBase(`${card.course_name}:${hole + 1}`, h, W, H, true);
+    if (!wrap.isConnected) return;
+    const syncUI = () => { clr.hidden = !satTap[key]; hint.hidden = !!satTap[key]; };
+    satDrawOverlay(cv, base, satTap[key], true);
+    syncUI();
+    satWireDrag(cv, base, key, true, syncUI);
+    clr.onclick = e => { e.stopPropagation(); delete satTap[key]; satDrawOverlay(cv, base, null, true); syncUI(); };
+    exp.onclick = e => { e.stopPropagation(); openSatModal(card, hole); };
+  });
 }
 // Auto refresh: once yardages are on, take a fresh GPS fix on every new hole, every 15 s while the
 // Live tab is on screen (so the number follows you from the green to the next tee and down the

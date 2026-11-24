@@ -402,6 +402,7 @@ function render() {
   $("#authbtn").textContent = editing() ? "Lock" : "Enter scores";
   document.body.classList.toggle("editing", editing());
   document.body.classList.toggle("oncard", tab === "card");
+  ydSync();
 }
 
 function statTile(label, value, sub = "") {
@@ -1596,6 +1597,7 @@ function viewCard(id) {
       <div class="hhead">
         <button class="nav" data-act="hole" data-v="${hole - 1}" ${hole === 0 ? "disabled" : ""} aria-label="Previous hole">‹</button>
         <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="cardsc" data-id="${id}">Par ${card.pars[hole]} · Hcp ${si[hole]}</button>
+          <button class="yds" data-act="yds" data-yds="${id}:${hole}">${ydText(card, hole)}</button>
           <div class="popline">${wins[hole] !== undefined ? (wins[hole] ? `<span class="hwin">${esc(pname(wins[hole]))} wins the hole</span>` : `<span class="hhalf">Hole halved</span>`) : ""}${(() => { if (wins[hole] !== undefined) return ""; const g = card.players.filter(p => pops[p][hole] > 0); return card.players.length < 2 ? "" : g.length ? `${g.map(p => esc(pname(p))).join(" & ")} ${g.length > 1 ? "stroke" : "strokes"} here` : "No strokes here"; })()}</div></div>
         <button class="nav" data-act="hole" data-v="${hole + 1}" ${hole === n - 1 ? "disabled" : ""} aria-label="Next hole">›</button>
       </div>
@@ -1967,6 +1969,7 @@ document.addEventListener("click", e => {
   if (act === "course-sc") courseScorecard(id);
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
   if (["hole", "sc", "par"].includes(act)) cardAction(act, b);
+  if (act === "yds") ydToggle();
 });
 // Keep the Strokes section open or closed while the live card redraws.
 document.addEventListener("toggle", e => { if (e.target.classList?.contains("strokesd")) viewCard._strokes = e.target.open; }, true);
@@ -2021,6 +2024,111 @@ document.addEventListener("change", e => {
   route();
   alertsInit(); // after the database client is ready
 })();
+
+// ---------- GPS yardages (front / middle / back of the green) ----------
+// Green outlines come from OpenStreetMap: greens.json for saved courses (tools/greens.py builds it,
+// matched hole by hole on number + par + hole handicap), otherwise the phone asks OpenStreetMap
+// itself the first time and keeps the answer. Only runs while the Live tab is open and yardages are on.
+const yd = { on: localStorage.getItem("golf_gps") === "1", pos: null, err: "", watch: null, file: null, live: {}, asked: {} };
+const M2Y = 1.09361;
+function ydLoadFile() {
+  if (yd.file) return;
+  yd.file = {};
+  fetch("greens.json?v=202611232300").then(r => r.ok ? r.json() : {}).then(j => { yd.file = j || {}; ydPaint(); }).catch(() => {});
+}
+function ydCourse(card) {
+  const c = state.courses.find(x => x.id === card.course_id) || state.courses.find(x => x.name === card.course_name && x.lat != null);
+  const any = c?.lat != null ? c : state.courses.find(x => x.name.split(" (")[0] === card.course_name.split(" (")[0] && x.lat != null);
+  return any ? { lat: any.lat, lng: any.lng } : null;
+}
+function ydGreens(card) {
+  const key = card.course_name;
+  if (yd.file?.[key]) return yd.file[key];
+  if (yd.live[key]) return yd.live[key];
+  try { const c = JSON.parse(localStorage.getItem("golf_greens_" + key) || "null"); if (c && Date.now() - c.at < 30 * 864e5) return (yd.live[key] = c.holes); } catch (e) { /* ignore */ }
+  if (yd.file && Object.keys(yd.file).length && !yd.asked[key]) { yd.asked[key] = true; ydFetchLive(card).catch(() => {}); }
+  return null;
+}
+const ydDist = (a, b) => Math.hypot((a[0] - b[0]) * 110540, (a[1] - b[1]) * 111320 * Math.cos(a[0] * Math.PI / 180));
+const ydPip = (pt, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [yi, xi] = poly[i], [yj, xj] = poly[j]; if (((yi > pt[0]) !== (yj > pt[0])) && (pt[1] < (xj - xi) * (pt[0] - yi) / (yj - yi) + xi)) c = !c; } return c; };
+// Course not in greens.json: ask OpenStreetMap (Overpass) once, match holes the same way the build script does.
+async function ydFetchLive(card) {
+  const loc = ydCourse(card); if (!loc) { yd.live[card.course_name] = {}; ydPaint(); return; }
+  const q = `[out:json][timeout:25];(way["golf"="hole"](around:2500,${loc.lat},${loc.lng});way["golf"="green"](around:2500,${loc.lat},${loc.lng}););out tags geom;`;
+  let j = null;
+  for (const u of OVERPASS) { try { const r = await timed(u, { method: "POST", body: "data=" + encodeURIComponent(q) }, 30000); if (r.ok) { j = await r.json(); break; } } catch (e) { /* next */ } }
+  if (!j) { yd.live[card.course_name] = {}; ydPaint(); return; } // no answer: no yardages this time (tap off/on to retry)
+  const geo = w => (w.geometry || []).map(p => [p.lat, p.lon]);
+  const greens = j.elements.filter(w => w.tags?.golf === "green").map(geo).filter(g => g.length > 2);
+  const hs = j.elements.filter(w => w.tags?.golf === "hole" && /^\d+$/.test(w.tags.ref || "")).map(w => { const l = geo(w); const pin = l[l.length - 1];
+    let g = greens.find(g => ydPip(pin, g)); if (!g) { g = greens.slice().sort((a, b) => ydDist(a[0], pin) - ydDist(b[0], pin))[0]; if (g && ydDist(g[0], pin) > 80) g = null; }
+    return { ref: +w.tags.ref, par: w.tags.par, hcp: w.tags.handicap, tee: l[0], pin, g }; }).filter(h => h.g && h.tee);
+  const parent = hs.map((_, i) => i), find = i => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+  hs.forEach((A, a) => hs.forEach((B, b) => { if (B.ref === A.ref + 1 && ydDist(A.pin, B.tee) < 300) parent[find(a)] = find(b); }));
+  const comps = {}; hs.forEach((h, i) => (comps[find(i)] ||= []).push(h));
+  const sis = card.sis?.length === card.pars.length ? card.sis : null;
+  let best = null, bs = 0;
+  for (const comp of Object.values(comps)) {
+    let sc = 0;
+    for (const h of comp) { const i = h.ref - 1; if (i >= card.pars.length) { sc--; continue; } sc += String(card.pars[i]) === h.par ? 1 : -3; if (h.hcp && sis) sc += String(sis[i]) === h.hcp ? 2 : -5; }
+    if (sc > bs) { best = comp; bs = sc; }
+  }
+  const holes = {};
+  (best || []).forEach(h => { if (h.ref <= card.pars.length && String(card.pars[h.ref - 1]) === h.par) holes[h.ref] = holes[h.ref] ? "dup" : { g: h.g, t: h.tee }; });
+  Object.keys(holes).forEach(k => { if (holes[k] === "dup") delete holes[k]; });
+  yd.live[card.course_name] = holes;
+  if (Object.keys(holes).length) try { localStorage.setItem("golf_greens_" + card.course_name, JSON.stringify({ at: Date.now(), holes })); } catch (e) { /* full */ }
+  ydPaint();
+}
+// Distances along the line from you through the middle of the green to its front and back edges.
+function ydNumbers(pos, g) {
+  const lat0 = pos[0], kx = 111320 * Math.cos(lat0 * Math.PI / 180), ky = 110540;
+  const P = g.map(p => [(p[1] - pos[1]) * kx, (p[0] - pos[0]) * ky]);
+  let A = 0, cx = 0, cy = 0;
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) { const f = P[j][0] * P[i][1] - P[i][0] * P[j][1]; A += f; cx += (P[j][0] + P[i][0]) * f; cy += (P[j][1] + P[i][1]) * f; }
+  if (Math.abs(A) < 1e-6) { cx = P.reduce((s, p) => s + p[0], 0) / P.length; cy = P.reduce((s, p) => s + p[1], 0) / P.length; } else { cx /= 3 * A; cy /= 3 * A; }
+  const mid = Math.hypot(cx, cy);
+  if (ydPip(pos, g)) return { on: true, mid };
+  const ux = cx / mid, uy = cy / mid, ts = [];
+  for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+    const [x1, y1] = P[j], [x2, y2] = P[i], ex = x2 - x1, ey = y2 - y1, den = ux * ey - uy * ex;
+    if (Math.abs(den) < 1e-9) continue;
+    const t = (x1 * ey - y1 * ex) / den, s2 = (x1 * uy - y1 * ux) / den;
+    if (t > 0 && s2 >= 0 && s2 <= 1) ts.push(t);
+  }
+  return { mid, front: ts.length ? Math.min(...ts) : mid, back: ts.length ? Math.max(...ts) : mid };
+}
+function ydText(card, hole) {
+  if (!yd.on) return `<span class="ydoff">📍 Yardages</span>`;
+  const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
+  if (yd.err) return `<span class="ydmsg">${esc(yd.err)}</span>`;
+  if (!h) return `<span class="ydmsg">${holes || (yd.file && !yd.asked[card.course_name]) ? "No yardage for this hole" : "Loading greens…"}</span>`;
+  if (!yd.pos) return `<span class="ydmsg">Finding you…</span>`;
+  const n = ydNumbers([yd.pos.lat, yd.pos.lng], h.g), y = m => Math.round(m * M2Y);
+  if (n.on) return `<span class="ydmsg">On the green</span>`;
+  if (y(n.mid) > 700) return `<span class="ydmsg">Not near hole ${hole + 1}</span>`;
+  const acc = yd.pos.acc > 18 ? `<span class="ydacc">±${Math.round(yd.pos.acc * M2Y)}</span>` : "";
+  return `<span class="ydf">F ${y(n.front)}</span><b>${y(n.mid)}</b><span class="ydf">B ${y(n.back)}</span>${acc}`;
+}
+function ydPaint() {
+  document.querySelectorAll("[data-yds]").forEach(el => { const [id, h] = el.dataset.yds.split(":"); const card = cardById(id); if (card) el.innerHTML = ydText(card, +h); });
+}
+function ydSync() {
+  const want = yd.on && state.tab === "card" && !document.hidden && "geolocation" in navigator;
+  if (want) ydLoadFile();
+  if (want && yd.watch == null) {
+    yd.watch = navigator.geolocation.watchPosition(p => { yd.err = ""; yd.pos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }; ydPaint(); },
+      e => { yd.err = e.code === 1 ? "Location is blocked. Allow it in Settings, Privacy, Location Services, Safari Websites." : ""; ydPaint(); },
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 });
+  } else if (!want && yd.watch != null) { navigator.geolocation.clearWatch(yd.watch); yd.watch = null; }
+}
+function ydToggle() {
+  yd.on = !yd.on; yd.err = "";
+  try { localStorage.setItem("golf_gps", yd.on ? "1" : "0"); } catch (e) { /* private mode */ }
+  if (!yd.on) { yd.pos = null; for (const k of Object.keys(yd.live)) if (!Object.keys(yd.live[k] || {}).length) { delete yd.live[k]; delete yd.asked[k]; } }
+  ydSync(); ydPaint();
+}
+document.addEventListener("visibilitychange", () => ydSync());
 
 // ---------- Home Screen app + push alerts ----------
 // Installable (manifest + sw.js). Alerts: the phone subscribes (Web Push), the subscription is saved through

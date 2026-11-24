@@ -12,7 +12,7 @@ self.addEventListener("fetch", e => {
   const r = e.request, u = new URL(r.url);
   if (r.method !== "GET" || u.origin !== location.origin) return;
   const page = r.mode === "navigate";
-  const asset = !page && /\.(js|css|png|webp)$/.test(u.pathname) && u.searchParams.has("v");
+  const asset = !page && /\.(js|css|png|webp|json)$/.test(u.pathname) && u.searchParams.has("v");
   if (!page && !asset) return;
   const key = page ? u.origin + u.pathname : u.href;
   e.respondWith((async () => {

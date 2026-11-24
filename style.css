@@ -561,3 +561,10 @@ button.upd { background: none; border: 0; padding: 2px 6px; color: var(--muted);
 html.app button.upd { cursor: pointer; text-decoration: underline dotted; }
 .ptr { position: fixed; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 6px); transform: translate(-50%, -60px); z-index: 70; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: 12.5px; font-weight: 700; box-shadow: 0 4px 14px var(--shadow); opacity: 0; transition: opacity .15s; pointer-events: none; }
 .ptr.on { opacity: 1; }
+/* GPS yardages on the hole screen */
+button.yds { display: inline-flex; align-items: baseline; gap: 8px; background: none; border: 0; padding: 2px 6px; margin-top: 1px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+button.yds b { font-size: 20px; font-weight: 800; color: var(--text); line-height: 1.1; }
+button.yds .ydf { font-size: 12.5px; color: var(--text-2); }
+button.yds .ydacc { font-size: 11px; color: var(--muted); }
+button.yds .ydoff { color: var(--accent); font-weight: 600; }
+button.yds .ydmsg { color: var(--muted); font-size: 12.5px; }

@@ -2591,7 +2591,7 @@ $("#al-off").addEventListener("click", async () => {
   document.documentElement.classList.add("app");
   const ind = document.createElement("div"); ind.className = "ptr"; ind.setAttribute("aria-hidden", "true"); document.body.appendChild(ind);
   const busy = () => !$("#modal").hidden;
-  const go = () => { ind.textContent = "Refreshing…"; ind.classList.add("rel"); ind.style.opacity = "1"; ind.style.transform = "translate3d(-50%,14px,0)"; location.reload(); };
+  const go = () => { ind.textContent = "Refreshing…"; ind.classList.add("rel", "go"); ind.style.opacity = "1"; ind.style.transform = "translate3d(-50%,14px,0)"; setTimeout(() => location.reload(), 450); };
   // Follows the finger on the GPU, one style write per frame, text changes only at the threshold,
   // springs back with a short ease on release.
   let y0 = null, d = 0, raf = 0, armed = null;

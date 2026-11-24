@@ -2306,7 +2306,7 @@ function ydNumbers(pos, g) {
   return { mid, front: ts.length ? Math.min(...ts) : mid, back: ts.length ? Math.max(...ts) : mid };
 }
 function ydText(card, hole) {
-  if (yd.busy) return `<span class="ydmsg">📍 Pulling GPS…</span>`;
+  if (yd.busy && !yd.pos) return `<span class="ydmsg">📍 Pulling GPS…</span>`;
   if (!yd.on) return `<span class="ydoff">📍 Get Yardage</span>`;
   const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
   if (yd.err) return `<span class="ydmsg">${esc(yd.err)}</span>`;
@@ -2383,9 +2383,12 @@ function ydPaint() {
   document.querySelectorAll("[data-ryds]").forEach(el => { const [id, h] = el.dataset.ryds.split(":"); const card = cardById(id); if (card) el.textContent = ydRoughText(card, +h); });
   document.querySelectorAll("[data-hmap]").forEach(el => { const [id, h] = el.dataset.hmap.split(":"); const card = cardById(id); if (card) el.innerHTML = ydHoleSvg(card, +h); });
 }
-// Auto refresh: once yardages are on, take a fresh GPS fix on every new hole and whenever the
-// phone comes back out of the pocket (app back in front after 20+ s). Skips holes with no green data.
-function ydSync() {
+// Auto refresh: once yardages are on, take a fresh GPS fix on every new hole, every 15 s while the
+// Live tab is on screen (so the number follows you from the green to the next tee and down the
+// fairway), and whenever the phone comes back out of the pocket. GPS never runs with the app hidden.
+// Skips holes with no green data.
+setInterval(() => { if (yd.on && !yd.busy && state.tab === "card" && !document.hidden) { yd.fixKey = ""; ydSync(true); } }, 15000);
+function ydSync(quiet) {
   if (state.tab !== "card") return;
   ydLoadFile();
   if (!yd.on || yd.busy || document.hidden || !("geolocation" in navigator)) return;
@@ -2396,6 +2399,7 @@ function ydSync() {
   if (key === yd.fixKey) return;
   const holes = ydGreens(card);
   if (holes && !(holes[hole + 1] || holes[String(hole + 1)])) return;
+  if (!quiet && yd.fixKey.split(":")[1] !== String(hole)) yd.pos = null; // new hole: don't show the old spot's number
   yd.fixKey = key;
   ydToggle();
 }
@@ -2414,7 +2418,7 @@ function ydToggle() {
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) { yd.hiddenAt = Date.now(); return; }
   if (yd.hiddenAt && Date.now() - yd.hiddenAt > 20000) yd.fixKey = ""; // pulled back out: fresh fix
-  ydSync();
+  ydSync(true);
 });
 
 // ---------- Home Screen app + push alerts ----------

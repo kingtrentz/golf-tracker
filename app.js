@@ -2316,7 +2316,10 @@ function ydRoughText(card, hole) {
 }
 function ydHoleSvg(card, hole) {
   const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
-  if (!h?.t || !h?.g?.length) return "";
+  if (!h?.t || !h?.g?.length) {
+    const done = holes || (yd.file && yd.asked[card.course_name] && yd.live[card.course_name]);
+    return `<div class="hmap-none">${done ? "No OpenStreetMap data for this hole" : "Loading hole map…"}</div>`;
+  }
   const gc = ydGreenCenter(h.g), t = h.t;
   const kx = 111320 * Math.cos(t[0] * Math.PI / 180), ky = 110540;
   const toM = p => [(p[1] - t[1]) * kx, (p[0] - t[0]) * ky];

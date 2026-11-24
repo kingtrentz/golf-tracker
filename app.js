@@ -2416,8 +2416,10 @@ function ydHoleNote(card, hole) {
   if (par >= 4 && h.fw?.length) {
     const pts = h.fw.flatMap(poly => poly.map(rel)).filter(x => x.a > L * 0.25 && x.a < L * 0.8);
     if (pts.length) {
-      const s = pts.reduce((q, x) => q + x.s, 0) / pts.length, a = pts.reduce((q, x) => q + x.a, 0) / pts.length;
-      if (Math.abs(s) > 18) bits.push(`${Math.abs(s) > 35 ? "Hard dogleg" : "Dogleg"} ${s > 0 ? "left" : "right"} around ${Y(a)}`);
+      // The fairway bulges out on the far side of the straight line: bulge right = dogleg left.
+      const s = pts.reduce((q, x) => q + x.s, 0) / pts.length;
+      const corner = pts.filter(x => Math.sign(x.s) === Math.sign(s)).reduce((m, x) => Math.abs(x.s) > Math.abs(m.s) ? x : m, pts[0]);
+      if (Math.abs(s) > 18) bits.push(`${Math.abs(s) > 35 ? "Hard dogleg" : "Dogleg"} ${s > 0 ? "right" : "left"} around ${Y(corner.a)}`);
     }
   }
   // Water in play: anything between the tee and just past the green, within 70 m of the line

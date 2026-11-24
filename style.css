@@ -664,3 +664,7 @@ header h1:has(.tw)::before { display: block; margin: 0 auto 3px; width: 40px; he
 .sc tr.hcp td { color: var(--muted); font-size: 10.5px; font-weight: 500; }
 .sc .sch { color: var(--muted); font-size: 10px; margin-left: 3px; font-weight: 600; }
 .sc .snet { display: block; color: var(--muted); font-size: 9.5px; font-weight: 600; white-space: nowrap; line-height: 1.1; }
+
+/* Caddy line under the hole number (replaces the hole map for now) */
+.hnote { margin: 2px 4px 10px; text-align: center; font-size: 13.5px; line-height: 1.35; color: var(--text-2); }
+.hnote:empty { display: none; }

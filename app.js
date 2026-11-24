@@ -1773,7 +1773,7 @@ function viewCard(id) {
           <div class="popline">${wins[hole] !== undefined ? (wins[hole] ? `<span class="hwin">${esc(pname(wins[hole]))} wins the hole</span>` : `<span class="hhalf">Hole halved</span>`) : ""}${(() => { if (wins[hole] !== undefined) return ""; const g = card.players.filter(p => pops[p][hole] > 0); return card.players.length < 2 ? "" : g.length ? `${g.map(p => esc(pname(p))).join(" & ")} ${g.length > 1 ? "stroke" : "strokes"} here` : "No strokes here"; })()}</div></div>
         <button class="nav" data-act="hole" data-v="${hole + 1}" ${hole === n - 1 ? "disabled" : ""} aria-label="Next hole">›</button>
       </div>
-      <div class="hmap" data-hmap="${id}:${hole}">${ydHoleSvg(card, hole)}</div>
+      <div class="hnote" data-hnote="${id}:${hole}">${ydHoleNote(card, hole)}</div>
       ${card.players.map(s => {
         const v = holeVals(card, s)[hole];
         const pop = pops[s][hole]; const hp = st.pts[s].per[hole];
@@ -2383,10 +2383,66 @@ function ydHoleSvg(card, hole) {
     <text x="${gcx.toFixed(1)}" y="${H - 5}" text-anchor="middle" class="hlbl">GREEN</text>
   </svg>`;
 }
+// Caddy note: one line per hole from the course outline data (OpenStreetMap): shape, water, sand.
+// Distances are yards from the tee along the line to the middle of the green. No club advice.
+function ydHoleNote(card, hole) {
+  const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
+  if (!h?.t || !h?.g?.length) {
+    const done = holes || (yd.file && yd.asked[card.course_name] && yd.live[card.course_name]);
+    return done ? "" : `<span class="muted">Loading hole notes…</span>`;
+  }
+  const gc = ydGreenCenter(h.g), t = h.t;
+  const kx = 111320 * Math.cos(t[0] * Math.PI / 180), ky = 110540;
+  const toM = p => [(p[1] - t[1]) * kx, (p[0] - t[0]) * ky];
+  const [gx, gy] = toM(gc), L = Math.hypot(gx, gy);
+  if (L < 30) return "";
+  const ux = gx / L, uy = gy / L;
+  // along = meters toward the green, side = meters off the line (+ left, - right)
+  const rel = p => { const [x, y] = toM(p); return { a: x * ux + y * uy, s: ux * y - uy * x }; };
+  const Y = m => Math.round(m * M2Y / 5) * 5;
+  const par = card.pars[hole], bits = [];
+  const center = poly => { const r = poly.map(rel); return { a: r.reduce((q, x) => q + x.a, 0) / r.length, s: r.reduce((q, x) => q + x.s, 0) / r.length, pts: r }; };
+  // Shape: where the fairway bends away from the straight line
+  if (par >= 4 && h.fw?.length) {
+    const pts = h.fw.flatMap(poly => poly.map(rel)).filter(x => x.a > L * 0.25 && x.a < L * 0.8);
+    if (pts.length) {
+      const s = pts.reduce((q, x) => q + x.s, 0) / pts.length, a = pts.reduce((q, x) => q + x.a, 0) / pts.length;
+      if (Math.abs(s) > 18) bits.push(`${Math.abs(s) > 35 ? "Hard dogleg" : "Dogleg"} ${s > 0 ? "left" : "right"} around ${Y(a)}`);
+    }
+  }
+  // Water in play: anything between the tee and just past the green, within 70 m of the line
+  const waters = (h.wt || []).map(center).map(w => ({ ...w, inPlay: w.pts.filter(x => x.a > 20 && x.a < L + 25 && Math.abs(x.s) < 70) })).filter(w => w.inPlay.length);
+  waters.sort((p, q) => Math.min(...p.inPlay.map(x => x.a)) - Math.min(...q.inPlay.map(x => x.a)));
+  for (const w of waters.slice(0, 2)) {
+    const near = Math.min(...w.inPlay.map(x => x.a)), far = Math.max(...w.inPlay.map(x => x.a));
+    const crosses = w.inPlay.some(x => x.s > 5) && w.inPlay.some(x => x.s < -5);
+    const side = w.s > 0 ? "left" : "right";
+    if (near > L - 45) bits.push(`Water ${crosses ? "in front of" : side + " of"} the green`);
+    else if (crosses) bits.push(`Water crosses at ${Y(near)}, ${Y(Math.min(far, L))} to clear it`);
+    else bits.push(`Water ${side} from ${Y(near)}`);
+  }
+  // Sand: fairway bunkers in the landing area, then bunkers around the green
+  const bks = (h.bk || []).map(center);
+  const fwb = par >= 4 ? bks.filter(b => b.a > 140 && b.a < L - 45 && Math.abs(b.s) < 45).sort((p, q) => p.a - q.a) : [];
+  if (fwb.length) {
+    const two = fwb.slice(0, 2), sd = b => b.s > 0 ? "left" : "right";
+    bits.push(two.length === 2 && sd(two[0]) === sd(two[1]) ? `Fairway sand ${sd(two[0])} at ${Y(two[0].a)} and ${Y(two[1].a)}` : `Fairway sand ${two.map(b => `${sd(b)} at ${Y(b.a)}`).join(", ")}`);
+  }
+  const gb = bks.filter(b => Math.hypot(b.a - L, b.s) < 40);
+  if (gb.length) {
+    const where = new Set(gb.map(b => b.a < L - 12 && Math.abs(b.s) < 12 ? "short" : b.a > L + 12 && Math.abs(b.s) < 12 ? "long" : b.s > 0 ? "left" : "right"));
+    const order = ["short", "left", "right", "long"].filter(x => where.has(x));
+    bits.push(order.length >= 3 ? "Green guarded by sand all around" : `Sand ${order.join(" and ")} of the green`);
+  }
+  // Only call a hole clean when the map data has hazards for this course (some courses only have greens)
+  const mapped = Object.values(holes).some(x => x?.bk?.length || x?.wt?.length);
+  if (!bits.length && mapped) bits.push(par === 3 ? "Clean look at the green" : "Straightaway, nothing in the way");
+  return esc(bits.slice(0, 3).join(" · "));
+}
 function ydPaint() {
   document.querySelectorAll("[data-yds]").forEach(el => { const [id, h] = el.dataset.yds.split(":"); const card = cardById(id); if (card) el.innerHTML = ydText(card, +h); });
   document.querySelectorAll("[data-ryds]").forEach(el => { const [id, h] = el.dataset.ryds.split(":"); const card = cardById(id); if (card) el.textContent = ydRoughText(card, +h); });
-  document.querySelectorAll("[data-hmap]").forEach(el => { const [id, h] = el.dataset.hmap.split(":"); const card = cardById(id); if (card) el.innerHTML = ydHoleSvg(card, +h); });
+  document.querySelectorAll("[data-hnote]").forEach(el => { const [id, h] = el.dataset.hnote.split(":"); const card = cardById(id); if (card) el.innerHTML = ydHoleNote(card, +h); });
 }
 // Auto refresh: once yardages are on, take a fresh GPS fix on every new hole, every 15 s while the
 // Live tab is on screen (so the number follows you from the green to the next tee and down the

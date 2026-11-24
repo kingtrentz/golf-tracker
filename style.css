@@ -615,7 +615,7 @@ button.lcourse.add { font-size: 15px; background: var(--gold-bg); border: 1px so
 .gcourses button.on { background: var(--gold-bg); border-color: var(--accent); font-weight: 700; }
 /* Desktop: keep the crest below the sticky header and sized to the space left (it was clipped by the header) */
 @media (min-width: 700px) {
-  body::before { top: 112px; background-position: center 45%; background-size: min(78vw, 520px, calc((100vh - 150px) * .93)) auto; }
+  body::before { top: 150px; background-position: center 80%; background-size: min(78vw, 500px, calc((100vh - 190px) * .93)) auto; }
 }
 .pctown { display: grid; grid-template-columns: minmax(0, 1fr) 74px auto; gap: 6px; margin-bottom: 6px; }
 .pctown select { padding: 10px 6px; }

@@ -519,9 +519,9 @@ html[data-theme="light"] body::before { opacity: .09; }
 @media (prefers-color-scheme: light) { html:not([data-theme="dark"]) body::before { opacity: .09; } }
 /* See-through cards so the crest shows across the page (including Live Match Play; hidden on Gallery) */
 body[data-tab="gallery"]::before { display: none; }
-body::before { opacity: var(--crest-o, .13); }
-html[data-theme="light"] body::before { opacity: var(--crest-o, .15); }
-@media (prefers-color-scheme: light) { html:not([data-theme="dark"]) body::before { opacity: var(--crest-o, .15); } }
+body::before { opacity: var(--crest-o, .2); }
+html[data-theme="light"] body::before { opacity: var(--crest-o, .22); }
+@media (prefers-color-scheme: light) { html:not([data-theme="dark"]) body::before { opacity: var(--crest-o, .22); } }
 body:not([data-tab="gallery"]) #main :is(.card, .tile, .spot, .hero) { background-color: color-mix(in srgb, var(--surface) var(--glass, 78%), transparent); }
 body:not([data-tab="gallery"]) #main .match { background-color: color-mix(in srgb, var(--surface-2) var(--glass, 78%), transparent); }
 body:not([data-tab="gallery"]) #main :is(.champ, .spot.today) { background: radial-gradient(120% 140% at 0% 0%, var(--gold-glow) 0%, color-mix(in srgb, var(--surface) var(--glass, 78%), transparent) 60%); }

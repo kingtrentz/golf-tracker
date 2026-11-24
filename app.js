@@ -2211,7 +2211,7 @@ document.addEventListener("change", e => {
 // Green outlines come from OpenStreetMap: greens.json for saved courses (tools/greens.py builds it),
 // otherwise the phone asks OpenStreetMap itself the first time and keeps the answer.
 // One-tap "call it up" mode: pulls a fresh GPS fix on demand when tapped (no battery-draining background watch).
-const yd = { on: false, busy: false, pos: null, err: "", file: null, live: {}, asked: {} };
+const yd = { on: localStorage.getItem("golf_gps") === "1", busy: false, pos: null, err: "", file: null, live: {}, asked: {}, fixKey: "", hiddenAt: 0 };
 const M2Y = 1.09361;
 function ydLoadFile() {
   if (yd.file) return;
@@ -2333,7 +2333,7 @@ function ydHoleSvg(card, hole) {
   const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
   if (!h?.t || !h?.g?.length) {
     const done = holes || (yd.file && yd.asked[card.course_name] && yd.live[card.course_name]);
-    return `<div class="hmap-none">${done ? "No OpenStreetMap data for this hole" : "Loading hole map…"}</div>`;
+    return done ? "" : `<div class="hmap-none">Loading hole map…</div>`;
   }
   const gc = ydGreenCenter(h.g), t = h.t;
   const kx = 111320 * Math.cos(t[0] * Math.PI / 180), ky = 110540;
@@ -2383,21 +2383,39 @@ function ydPaint() {
   document.querySelectorAll("[data-ryds]").forEach(el => { const [id, h] = el.dataset.ryds.split(":"); const card = cardById(id); if (card) el.textContent = ydRoughText(card, +h); });
   document.querySelectorAll("[data-hmap]").forEach(el => { const [id, h] = el.dataset.hmap.split(":"); const card = cardById(id); if (card) el.innerHTML = ydHoleSvg(card, +h); });
 }
+// Auto refresh: once yardages are on, take a fresh GPS fix on every new hole and whenever the
+// phone comes back out of the pocket (app back in front after 20+ s). Skips holes with no green data.
 function ydSync() {
-  if (state.tab === "card") ydLoadFile();
+  if (state.tab !== "card") return;
+  ydLoadFile();
+  if (!yd.on || yd.busy || document.hidden || !("geolocation" in navigator)) return;
+  const card = cardById(state.cardId); if (!card) return;
+  const n = (card.pars || []).length || 18;
+  const hole = Math.min(n - 1, Math.max(0, Number(localStorage.getItem("golf_hole_" + card.id) ?? firstOpenHole(card))));
+  const key = card.id + ":" + hole;
+  if (key === yd.fixKey) return;
+  const holes = ydGreens(card);
+  if (holes && !(holes[hole + 1] || holes[String(hole + 1)])) return;
+  yd.fixKey = key;
+  ydToggle();
 }
 function ydToggle() {
   yd.on = true; yd.err = ""; yd.busy = true;
+  try { localStorage.setItem("golf_gps", "1"); } catch (e) { /* private mode */ }
   ydLoadFile();
   ydPaint();
   if (!("geolocation" in navigator)) { yd.busy = false; yd.err = "GPS not supported on this device"; ydPaint(); return; }
   navigator.geolocation.getCurrentPosition(
     p => { yd.busy = false; yd.err = ""; yd.pos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy }; ydPaint(); },
-    e => { yd.busy = false; yd.err = e.code === 1 ? "Location blocked — allow in Safari Settings" : "Could not get GPS — tap to retry"; ydPaint(); },
+    e => { yd.busy = false; yd.err = e.code === 1 ? "Location blocked. Allow it in Safari Settings." : "Could not get GPS. Tap to retry."; ydPaint(); },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
   );
 }
-document.addEventListener("visibilitychange", () => ydSync());
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) { yd.hiddenAt = Date.now(); return; }
+  if (yd.hiddenAt && Date.now() - yd.hiddenAt > 20000) yd.fixKey = ""; // pulled back out: fresh fix
+  ydSync();
+});
 
 // ---------- Home Screen app + push alerts ----------
 // Installable (manifest + sw.js). Alerts: the phone subscribes (Web Push), the subscription is saved through

@@ -581,10 +581,16 @@ button.yds .ydmsg { color: var(--muted); font-size: 12.5px; }
 /* Compact dark-mode hole silhouette */
 .hmap:empty { display: none; }
 .hmap { margin: 2px 0 8px; padding: 4px 6px; border-radius: 12px; background: color-mix(in srgb, var(--bg) 70%, transparent); border: 1px solid color-mix(in srgb, var(--line) 80%, transparent); }
-.hsvg { display: block; width: 100%; height: auto; max-height: 92px; }
+.hsvg { display: block; width: 100%; height: auto; max-height: 102px; }
+.htree { fill: #0e1c13; stroke: #1a3022; stroke-width: .7; opacity: .75; }
+.hwater { fill: #12334d; stroke: #2a6ea6; stroke-width: 1; }
+.hbunker { fill: #b89b6a; stroke: #d8c196; stroke-width: .8; opacity: .9; }
 .hfairway { fill: #172b1e; stroke: #254430; stroke-width: 1; }
 .hline { stroke: color-mix(in srgb, var(--accent) 35%, transparent); stroke-width: 1; stroke-dasharray: 3 3; }
 .hgreen { fill: #285c3a; stroke: #4ca96c; stroke-width: 1.4; }
+html[data-theme="light"] .htree { fill: #b8d1b7; stroke: #8fb38e; opacity: .65; }
+html[data-theme="light"] .hwater { fill: #8ec5eb; stroke: #4a95cc; }
+html[data-theme="light"] .hbunker { fill: #e6d3a7; stroke: #c4ab74; }
 html[data-theme="light"] .hfairway { fill: #d9ebd8; stroke: #a8cfa7; }
 html[data-theme="light"] .hgreen { fill: #58a66c; stroke: #2d7040; }
 .htee { fill: var(--accent); opacity: .85; }

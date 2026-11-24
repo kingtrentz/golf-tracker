@@ -617,3 +617,6 @@ button.lcourse.add { font-size: 15px; background: var(--gold-bg); border: 1px so
 @media (min-width: 700px) {
   body::before { top: 112px; background-position: center 45%; background-size: min(78vw, 520px, calc((100vh - 150px) * .93)) auto; }
 }
+.pctown { display: grid; grid-template-columns: minmax(0, 1fr) 74px auto; gap: 6px; margin-bottom: 6px; }
+.pctown select { padding: 10px 6px; }
+.pctown .pcgo { padding: 0 14px; font-weight: 700; }

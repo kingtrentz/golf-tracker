@@ -679,11 +679,20 @@ const courseNames = () => {
 };
 const courseLabel = n => { const s = splitName(n); return s.layout ? `${s.layout} · ${s.base}` : s.base; };
 const photoCourse = p => p.course_name || (p.match_id && state.matches.find(m => m.id === p.match_id)?.course_name) || "";
+const US_STATES = { AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware", FL: "Florida", GA: "Georgia", HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky", LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota", MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire", NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota", OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina", SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia", WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming" };
+const NOMI = "https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&";
+const tidyName = n => n.replace(/\b([A-Z])([A-Z]+)([a-z]+)/g, (m, a, b, c) => a + b.toLowerCase() + c); // "Country HIlls" -> "Country Hills"
+const nomPlace = a => ({ city: a?.city || a?.town || a?.village || a?.hamlet || a?.county || "", state: a?.state || "" });
 function photoCourseField(v) {
+  let town = {}; try { town = JSON.parse(localStorage.getItem("golf_town") || "{}"); } catch (e) { /* ignore */ }
+  const st = town.st || "TN";
   return `<div class="pcpick"><div class="altl">Course</div><input type="hidden" name="course" value="${esc(v || "")}">
     <div class="pcsel"></div>
     <div class="chips pcchips">${courseNames().slice(0, 8).map(n => `<button type="button" data-pc="${esc(n)}">${esc(courseLabel(n))}</button>`).join("")}<button type="button" class="pcnear">📍 Near me</button></div>
-    <input class="pcsearch" type="search" placeholder="Search any course" autocomplete="off" autocapitalize="words" spellcheck="false">
+    <div class="pctown"><input class="pctownin" placeholder="Town, e.g. Hendersonville" autocomplete="off" autocapitalize="words" spellcheck="false" value="${esc(town.city || "")}">
+      <select class="pcst" aria-label="State">${Object.keys(US_STATES).map(k => `<option ${k === st ? "selected" : ""}>${k}</option>`).join("")}</select>
+      <button type="button" class="pcgo">Courses</button></div>
+    <input class="pcsearch" type="search" placeholder="Or search a course name" autocomplete="off" autocapitalize="words" spellcheck="false">
     <div class="pcres"></div></div>`;
 }
 function wirePhotoCourse(f) {
@@ -696,25 +705,49 @@ function wirePhotoCourse(f) {
   };
   const pick = name => { hid.value = name; manual = true; res.innerHTML = ""; q.value = ""; paint(); };
   const rows = (list, note) => {
-    res.innerHTML = list.length ? list.map(c => `<button type="button" class="pcrow" data-name="${esc(c.name)}"><b>${esc(c.label || c.name)}</b><span>${esc([c.city, c.state].filter(Boolean).join(", "))}${c.mi != null ? `${c.city || c.state ? " · " : ""}${c.mi.toFixed(1)} mi` : ""}${c.saved ? `${c.city || c.state || c.mi != null ? " · " : ""}saved` : ""}</span></button>`).join("") : `<div class="muted small pcnote">${esc(note || "No courses found.")}</div>`;
+    res.innerHTML = (list.length ? list.map(c => `<button type="button" class="pcrow" data-name="${esc(c.name)}"><b>${esc(c.label || c.name)}</b><span>${esc([[c.city, c.state].filter(Boolean).join(", "), c.mi != null ? c.mi.toFixed(1) + " mi" : "", c.saved ? "saved" : ""].filter(Boolean).join(" · "))}</span></button>`).join("") : "") + (note ? `<div class="muted small pcnote">${esc(note)}</div>` : "");
     res.querySelectorAll(".pcrow").forEach(b => b.onclick = () => pick(b.dataset.name));
   };
+  const dedupe = list => { const seen = new Set(); return list.filter(c => { const k = c.name.toLowerCase(); return !seen.has(k) && seen.add(k); }); };
   box.querySelectorAll("[data-pc]").forEach(b => b.onclick = () => pick(b.dataset.pc));
+  // Name search: saved courses at once, then OpenStreetMap as soon as it answers (OpenGolfAPI joins if it's quick).
   q.oninput = () => {
     clearTimeout(timer); const term = q.value.trim(), my = ++seq;
     if (term.length < 2) { res.innerHTML = ""; return; }
-    const local = courseNames().filter(n => n.toLowerCase().includes(term.toLowerCase())).map(n => ({ name: n, label: courseLabel(n), saved: true }));
-    rows(local, "Searching…");
-    if (local.length) res.insertAdjacentHTML("beforeend", `<div class="muted small pcnote">Searching for more…</div>`);
-    timer = setTimeout(async () => {
-      const [og, nm] = await Promise.allSettled([ogByName(term), timed(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&addressdetails=1&q=${encodeURIComponent(term + " golf")}`, {}, 8000).then(r => r.json())]);
-      if (my !== seq) return;
-      const more = [...(og.value || []).map(c => ({ name: c.name, city: c.city, state: c.state })),
-        ...((nm.value || []).filter(e => e.type === "golf_course" && e.name).map(e => ({ name: e.name, city: e.address?.city || e.address?.town || e.address?.village || "", state: e.address?.state || "" })))];
-      const seen = new Set(local.map(c => c.name.toLowerCase()));
-      rows([...local, ...more.filter(c => !seen.has(c.name.toLowerCase()) && seen.add(c.name.toLowerCase()))].slice(0, 12));
-    }, 350);
+    let list = courseNames().filter(n => n.toLowerCase().includes(term.toLowerCase())).map(n => ({ name: n, label: courseLabel(n), saved: true }));
+    rows(list, "Searching…");
+    timer = setTimeout(() => {
+      let pending = 3;
+      const add = more => { if (my !== seq) return; list = dedupe([...list, ...more]); pending--; rows(list.slice(0, 15), pending ? "Searching…" : list.length ? "" : "No courses found. Try the town and state above."); };
+      const nom = qq => timed(NOMI + "limit=10&countrycodes=us&q=" + encodeURIComponent(qq), {}, 6000).then(r => r.json())
+        .then(j => j.filter(e => e.type === "golf_course" && e.name).map(e => ({ name: tidyName(e.name), ...nomPlace(e.address) }))).catch(() => []);
+      nom(term).then(add); nom(term + " golf").then(add);
+      Promise.race([ogByName(term).catch(() => []), new Promise(r => setTimeout(() => r([]), 4000))]).then(og => add(og.map(c => ({ name: c.name, city: c.city, state: c.state }))));
+    }, 300);
   };
+  // Town + state: every golf course in and around that town (OpenStreetMap), A to Z.
+  const town = async () => {
+    const city = $(".pctownin", box).value.trim(), st = $(".pcst", box).value, my = ++seq;
+    if (!city) { $(".pctownin", box).focus(); return; }
+    try { localStorage.setItem("golf_town", JSON.stringify({ city, st })); } catch (e) { /* ignore */ }
+    rows([], `Finding courses around ${city}, ${st}…`);
+    try {
+      const g = await (await timed(NOMI + "limit=1&countrycodes=us&city=" + encodeURIComponent(city) + "&state=" + encodeURIComponent(US_STATES[st]), {}, 7000)).json();
+      if (my !== seq) return;
+      if (!g.length) return rows([], `Couldn't find ${city}, ${st}. Check the spelling.`);
+      const [s1, n1, w1, e1] = g[0].boundingbox.map(Number), pad = 0.08;
+      const vb = `${w1 - pad},${n1 + pad},${e1 + pad},${s1 - pad}`;
+      const near = async qq => (await (await timed(NOMI + `limit=50&bounded=1&viewbox=${vb}&q=` + encodeURIComponent(qq), {}, 8000)).json()).filter(e => e.type === "golf_course" && e.name);
+      const [a, b] = await Promise.all([near("golf course"), near("country club").catch(() => [])]);
+      if (my !== seq) return;
+      const lat = Number(g[0].lat), lng = Number(g[0].lon);
+      const saved = state.courses.filter(c => c.lat != null).map(c => ({ name: c.name, label: courseLabel(c.name), saved: true, mi: miles(lat, lng, c.lat, c.lng) })).filter(c => c.mi < 15);
+      const list = dedupe([...saved, ...[...a, ...b].map(e => ({ name: tidyName(e.name), ...nomPlace(e.address), mi: miles(lat, lng, Number(e.lat), Number(e.lon)) }))]).sort((x, y) => x.mi - y.mi);
+      rows(list.slice(0, 30), list.length ? "" : `No golf courses found around ${city}, ${st}.`);
+    } catch (err) { if (my === seq) rows([], "Couldn't reach the course map. Try again."); }
+  };
+  $(".pcgo", box).onclick = town;
+  $(".pctownin", box).onkeydown = e => { if (e.key === "Enter") { e.preventDefault(); town(); } };
   $(".pcnear", box).onclick = async () => {
     const my = ++seq; rows([], "Finding courses near you…");
     try {
@@ -722,8 +755,8 @@ function wirePhotoCourse(f) {
       const saved = state.courses.filter(c => c.lat != null).map(c => ({ name: c.name, label: courseLabel(c.name), saved: true, mi: miles(loc.lat, loc.lng, c.lat, c.lng) })).filter(c => c.mi < 30);
       const near = await nominatimNear(loc);
       if (my !== seq) return;
-      const seen = new Set(), all = [...saved, ...near].filter(c => c.mi < 30 && !seen.has(c.name.toLowerCase()) && seen.add(c.name.toLowerCase())).sort((a, b) => a.mi - b.mi).slice(0, 12);
-      rows(all, "No courses found near you.");
+      const all = dedupe([...saved, ...near]).filter(c => c.mi < 30).sort((a, b) => a.mi - b.mi).slice(0, 15);
+      rows(all, all.length ? "" : "No courses found near you.");
     } catch (err) { rows([], errMsg(err)); }
   };
   if (f.match) f.match.addEventListener("change", () => { const mt = state.matches.find(x => x.id === f.match.value); if (mt?.course_name && !manual) { hid.value = mt.course_name; paint(); } });

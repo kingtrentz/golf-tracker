@@ -79,5 +79,4 @@ With no Supabase keys in `config.js`, the site runs on the sample data in `demo.
 - Edit names, colors, or the site title in `config.js`.
 
 ## Known issues
-- **`setup.sql` won't run as committed.** Line 53 reads `creatcreate table if not exists players (`: the end of the `rounds` table (its last column and closing bracket) got merged into the start of the `players` table. The live database is already set up, so the site isn't affected; it only matters if the database is ever rebuilt from this file. Needs a careful fix before reuse.
 - The handicap and match math lives in two places (`app.js` and `supabase/functions/push/golf.ts`). A change to one needs the same change in the other, or alerts will disagree with the site.

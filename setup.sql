@@ -50,7 +50,11 @@ create table if not exists rounds (
   score int not null check (score between 18 and 200),
   match_id uuid references matches(id) on delete set null,
   notes text,
-  creatcreate table if not exists players (
+  created_at timestamptz not null default now(),
+  created_by uuid default auth.uid()
+);
+
+create table if not exists players (
   slug text primary key,
   starting_index numeric(4,1),
   updated_at timestamptz not null default now()

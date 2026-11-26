@@ -1955,7 +1955,7 @@ function goHole(id, h) {
   localStorage.setItem("golf_hole_" + id, h); render();
 }
 function cardAction(act, b) {
-  if (act === "theme") { $("#themebtn")?.click(); render(); return; }
+  if (act === "theme") { window.toggleTheme?.(); render(); return; }
   const id = state.cardId; const card = cardById(id); if (!card) return;
   // Right after the hole changes (a tap or the auto-advance), ignore taps for a moment so quick
   // taps meant for the old hole don't land on the new one or skip a hole.
@@ -2499,15 +2499,22 @@ document.addEventListener("change", e => {
   }
 });
 
-// Tapping the turtle shell above the title does a full fresh reload (drops the offline copy first).
-// Deliberately unlabeled: no cursor, no hint, nothing on screen.
+// The turtle shell above the title. Deliberately unlabeled: no cursor, no hint, nothing on screen.
+// One tap: full fresh reload (drops the offline copy first). Double tap: switch white and purple mode.
+// The single tap waits a beat so a second tap can cancel the reload.
+const SHELL_DOUBLE_MS = 350;
+let shellTimer = null;
 document.addEventListener("click", e => {
   const h = e.target.closest && e.target.closest("header h1#title");
   if (!h || !h.querySelector(".tw")) return;
   const tw = h.querySelector(".tw").getBoundingClientRect();
   if (e.clientY >= tw.top) return; // only the shell, which sits above "THE"
-  (window.caches ? caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))) : Promise.resolve())
-    .catch(() => {}).then(() => location.reload());
+  if (shellTimer) { clearTimeout(shellTimer); shellTimer = null; window.toggleTheme?.(); return; }
+  shellTimer = setTimeout(() => {
+    shellTimer = null;
+    (window.caches ? caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))) : Promise.resolve())
+      .catch(() => {}).then(() => location.reload());
+  }, SHELL_DOUBLE_MS);
 });
 (async function init() {
   document.title = CFG.siteTitle;
@@ -2534,8 +2541,8 @@ document.addEventListener("click", e => {
     sb = createClient(CFG.supabaseUrl, CFG.supabaseAnonKey, { auth: { persistSession: false, autoRefreshToken: false } });
   }
   $("#fab").onclick = addMenu;
-  // Deep-dark default with optional Light Mode toggle (saved to localStorage).
-  const themeNow = () => document.documentElement.dataset.theme === "light" ? "light" : "dark";
+  // White (sand) mode by default; double-tap the shell for purple mode. Choice saved per phone.
+  const themeNow = () => document.documentElement.dataset.theme === "dark" ? "dark" : "light";
   const setThemeColor = hex => {
     // Re-inserting the meta tag forces iOS standalone PWA to repaint the very top bar immediately.
     document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.remove());
@@ -2546,19 +2553,15 @@ document.addEventListener("click", e => {
   };
   const paintTheme = () => {
     const t = themeNow();
-    const tb = $("#themebtn");
-    if (tb) { tb.textContent = t === "light" ? "☾" : "☀"; tb.title = t === "light" ? "Dark mode" : "Light mode"; }
     setThemeColor(t === "light" ? "#c3b090" : "#53275a");
     document.documentElement.style.backgroundColor = t === "light" ? "#dfd3be" : "#150c17";
   };
-  if ($("#themebtn")) {
-    $("#themebtn").onclick = () => {
-      const next = themeNow() === "light" ? "dark" : "light";
-      document.documentElement.dataset.theme = next;
-      try { localStorage.setItem("golf_theme", next); } catch (e) { /* private mode */ }
-      paintTheme();
-    };
-  }
+  window.toggleTheme = () => {
+    const next = themeNow() === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("golf_mode", next); } catch (e) { /* private mode */ }
+    paintTheme();
+  };
   paintTheme();
   window.addEventListener("hashchange", route);
   let rz = null, lastW = innerWidth;

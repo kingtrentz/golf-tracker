@@ -780,3 +780,5 @@ body[data-tab="card"] .totop, body[data-tab="card"] .abyss { display: none !impo
 .gnew .acts { margin-top: 8px; }
 .gpicker .hint { margin-top: 6px; }
 .dot.gdot { background: transparent !important; box-shadow: inset 0 0 0 2px #8a8f98; }
+.solostart { margin: 4px 0 12px; }
+.solostart .primary { width: 100%; justify-content: center; }

@@ -1336,8 +1336,7 @@ const cardCh = (card, s) => {
 };
 const cardPts = (card, s) => stableford(holeVals(card, s), card.pars, card.sis, null, matchPops(card)[s]);
 // Match strokes ("pops"): strokes off the lowest handicap in the group, on the hardest holes (none in gross stroke play).
-function matchPops(card) {
-  const gm = cardGame(card);
+function matchPops(card, gm = cardGame(card)) {
   if (gm === "stroke" || gm === "gross") return Object.fromEntries(card.players.map(s => [s, card.pars.map(() => 0)]));
   return groupPops(Object.fromEntries(card.players.map(s => [s, cardCh(card, s)])), card.pars, card.sis);
 }
@@ -1371,11 +1370,14 @@ const cardPairs = card => { const pp = matchPops(card);
 // strokes, or net/gross strokes for stroke play. Ties push. A press is a new bet
 // from a hole to the end of that nine (or the game).
 const BET_DEFAULT = CFG.bets || { front: 5, back: 5, game: 10 };
+// The money can be scored its own way (bets.scoring); left blank it follows the round's game.
+const moneyGame = card => card.bets?.scoring || cardGame(card);
+const moneyPops = card => matchPops(card, moneyGame(card));
 const money = n => (n < 0 ? "-" : "") + "$" + (Math.abs(n) % 1 ? Math.abs(n).toFixed(2) : Math.abs(n));
 const SEG_NAME = { front: "Front 9", back: "Back 9", game: "Game" };
 const segRange = (seg, n) => seg === "front" ? [0, 9] : seg === "back" ? [9, 18] : [0, n];
 function betLeg(card, pops, a, b, from, to) {
-  const va = holeVals(card, a), vb = holeVals(card, b), gm = cardGame(card);
+  const va = holeVals(card, a), vb = holeVals(card, b), gm = moneyGame(card);
   const gross = gm === "stroke" || gm === "gross", mp = gm === "match", sk = gm === "skins", sf = gm === "stableford";
   let d = 0, thru = 0, pot = 1;
   for (let i = from; i < to; i++) {
@@ -1402,7 +1404,8 @@ function betLeg(card, pops, a, b, from, to) {
 function settleBets(card) {
   const b = card.bets;
   if (!b || bettors(card).length < 2) return null;
-  const n = card.pars.length, pops = matchPops(card);
+  if (b.type === "pot") return settlePot(card);
+  const n = card.pars.length, pops = moneyPops(card);
   const segs = n === 18 ? ["front", "back", "game"] : ["game"];
   const pairs = pairsOf(bettors(card)).map(([a, c]) => {
     const legs = segs.filter(k => +b[k] > 0).map(k => { const [f, t] = segRange(k, n);
@@ -1424,13 +1427,65 @@ function settleBets(card) {
   });
   return { pairs, net, pays, done: pairs.every(p => p.legs.every(l => l.done)) };
 }
-const stakesText = (b, n) => (n === 18 ? [b.front, b.back, b.game] : [b.game]).map(x => money(+x || 0)).join(" · ");
+// ---------- pot: everyone in the money buys in once; the best result in the round's game takes it ----------
+// Scored by the money's own scoring (moneyGame). Stroke play: lowest gross. Net: lowest net. Stableford: most points. Skins: most skins.
+// Match play: most matches won across the pairings, then most holes up overall.
+// Ties split the pot. It only pays once everyone in it has finished every hole.
+const POT_DEFAULT = (CFG.bets && CFG.bets.pot) || 10;
+function potRows(card) {
+  const P = bettors(card), gm = moneyGame(card), pops = moneyPops(card);
+  if (gm === "stableford") return P.map(s => { const v = stableford(holeVals(card, s), card.pars, card.sis, null, pops[s]).pts; return { s, k: [v], show: `${v} pt${v === 1 ? "" : "s"}` }; });
+  if (gm === "skins") { const sk = cardSkins(card, pops); return P.map(s => { const v = sk.skins[s] || 0; return { s, k: [v], show: `${v} skin${v === 1 ? "" : "s"}` }; }); }
+  if (gm === "match") {
+    const w = Object.fromEntries(P.map(s => [s, 0])), up = { ...w };
+    pairsOf(P).forEach(([a, b]) => { const pr = matchPlay(a, b, holeVals(card, a), holeVals(card, b), cardCh(card, a), cardCh(card, b), card.pars, card.sis, pops[a], pops[b]);
+      up[a] += pr.up; up[b] -= pr.up; if (pr.up > 0) w[a]++; else if (pr.up < 0) w[b]++; });
+    return P.map(s => ({ s, k: [w[s], up[s]], show: `${w[s]} won · ${up[s] > 0 ? "+" : ""}${up[s]}` }));
+  }
+  // Stroke (gross) has no strokes in matchPops; net takes the group strokes off.
+  return P.map(s => { let t = 0; holeVals(card, s).forEach((v, i) => { if (v != null) t += v - pops[s][i] - card.pars[i]; });
+    return { s, k: [-t], show: fmtToPar(t) + (gm === "net" ? " net" : "") }; });
+}
+function settlePot(card) {
+  const buy = +card.bets.pot || 0, P = bettors(card), total = buy * P.length;
+  const cmp = (x, y) => { for (let i = 0; i < x.k.length; i++) if (x.k[i] !== y.k[i]) return y.k[i] - x.k[i]; return 0; };
+  const rows = potRows(card).sort(cmp);
+  const started = P.some(s => cardTotals(card, s).thru);
+  const winners = started ? rows.filter(r => cmp(r, rows[0]) === 0).map(r => r.s) : [];
+  const done = P.every(s => cardTotals(card, s).done);
+  const net = Object.fromEntries(P.map(s => [s, 0])), pays = [];
+  if (done && winners.length < P.length) {
+    // Each player who didn't win pays the buy-in, split evenly (to the cent) among the winners.
+    const cents = Math.round(buy * 100), share = Math.floor(cents / winners.length), rem = cents - share * winners.length;
+    P.filter(s => !winners.includes(s)).forEach((from, li) => winners.forEach((to, wi) => {
+      const amt = (share + ((wi - li % winners.length + winners.length) % winners.length < rem ? 1 : 0)) / 100;
+      if (amt > 0) { pays.push({ from, to, amt }); net[to] += amt; net[from] -= amt; }
+    }));
+    for (const s of P) net[s] = Math.round(net[s] * 100) / 100;
+  }
+  return { pot: true, buy, total, rows, winners, net, pays, done };
+}
+const stakesText = (b, n) => b.type === "pot" ? `Pot · ${money(+b.pot || 0)} each`
+  : (n === 18 ? [b.front, b.back, b.game] : [b.game]).map(x => money(+x || 0)).join(" · ");
 const paysText = (pays, past) => pays.map(x => `${esc(pname(x.from))} ${past ? "paid" : "pays"} ${esc(pname(x.to))} <b>${money(x.amt)}</b>`).join("<br>");
 function betsBox(card) {
   const r = settleBets(card), ed = editing();
   if (!r) return bettors(card).length > 1 && ed ? `<div class="ed acts center"><button class="link" data-act="bets" data-id="${card.id}">Add bets</button></div>` : "";
   const n = card.pars.length;
-  return `<section class="card bets"><h3>Bets <span class="muted small">${stakesText(card.bets, n)}</span></h3>
+  if (r.pot) {
+    const share = r.winners.length ? r.total / r.winners.length : 0, gm = moneyGame(card);
+    const lead = r.winners.map(s => esc(pname(s))).join(" & ");
+    const sum = r.done ? (r.pays.length ? paysText(r.pays) : "Everyone tied, nobody pays.")
+      : r.winners.length ? `${lead} ${r.winners.length > 1 ? "would split" : "would take"} the ${money(r.total)} pot <span class="muted">so far</span>` : "Nobody owes anything yet.";
+    return `<section class="card bets"><h3>Pot <span class="muted small">${money(r.buy)} each · ${money(r.total)} · ${esc(SCORING_LABEL[gm] || gm)}</span></h3>
+      ${r.rows.map(x => `<div class="brow ${r.done ? "fin" : ""}"><span>${dot(x.s)}${esc(pname(x.s))}</span>
+        <b style="${r.winners.includes(x.s) ? `color:${pcolor(x.s)}` : ""}">${esc(x.show)}${r.done && r.winners.includes(x.s) && r.winners.length < r.rows.length ? ` · ${money(Math.round(share * 100) / 100)}` : ""}</b></div>`).join("")}
+      <div class="bsum">${sum}</div>
+      ${ed ? `<div class="acts"><button class="link" data-act="bets" data-id="${card.id}">Change bets</button></div>` : ""}
+    </section>`;
+  }
+  const own = card.bets.scoring && card.bets.scoring !== cardGame(card) ? ` · ${esc(SCORING_LABEL[card.bets.scoring] || card.bets.scoring)}` : "";
+  return `<section class="card bets"><h3>Bets <span class="muted small">${stakesText(card.bets, n)}${own}</span></h3>
     ${r.pairs.map(p => `${r.pairs.length > 1 ? `<div class="bpair">${dot(p.a)}${esc(pname(p.a))} v ${dot(p.b)}${esc(pname(p.b))}</div>` : ""}
       ${p.legs.map(l => `<div class="brow ${l.done ? "fin" : ""}"><span>${esc(l.label)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ""} <small>${money(l.amt)}</small>${l.k === "press" && ed ? ` <button class="link xs" data-act="unpress" data-id="${card.id}" data-v="${l.pi}" aria-label="Remove press">✕</button>` : ""}</span>
         <b style="${l.lead ? `color:${pcolor(l.lead)}` : ""}">${esc(l.text)}</b></div>`).join("")}`).join("")}
@@ -1439,23 +1494,35 @@ function betsBox(card) {
   </section>`;
 }
 // Stake inputs used on Start match, Start a scorecard, and Change bets.
+// Two games: Nassau (each pair plays front, back and game, with presses) or a Pot (one buy-in each).
+const BET_NOTE = { nassau: "Each pair plays its own bets. Ties push. Press anytime from the Live tab.",
+  pot: "Everyone in the money buys in once. Best result (by Scored by) takes the pot, ties split. Most you can lose is the buy-in." };
 function betFields(b, holes) {
   const on = b !== null && b !== undefined ? !!b : true; b = b || BET_DEFAULT;
-  const inp = (k, lbl) => `<label data-seg="${k}"><span class="blbl">${lbl}</span><span class="dollar"><input name="b_${k}" inputmode="decimal" value="${b[k] ?? BET_DEFAULT[k]}" aria-label="${lbl} bet in dollars"></span></label>`;
-  return `<div class="betbox"><label class="chk"><input type="checkbox" name="beton" ${on ? "checked" : ""}> Playing for money</label>
-    <div class="betin" ${on ? "" : "hidden"}>${inp("front", "Front 9")}${inp("back", "Back 9")}${inp("game", holes === 9 ? "9 holes" : "Game")}</div>
-    <p class="hint betnote" ${on ? "" : "hidden"}>Each pair plays its own bets. Ties push. Press anytime from the Live tab.</p></div>`;
+  const type = b.type === "pot" ? "pot" : "nassau", nb = type === "pot" ? BET_DEFAULT : b;
+  const inp = (k, lbl) => `<label data-seg="${k}"><span class="blbl">${lbl}</span><span class="dollar"><input name="b_${k}" inputmode="decimal" value="${nb[k] ?? BET_DEFAULT[k]}" aria-label="${lbl} bet in dollars"></span></label>`;
+  return `<div class="betbox" data-type="${type}"><label class="chk"><input type="checkbox" name="beton" ${on ? "checked" : ""}> Playing for money</label>
+    <div class="betwrap" ${on ? "" : "hidden"}><div class="row2 betsel">
+      <label>Bet<select name="b_type">${[["nassau", "Nassau"], ["pot", "Pot"]].map(([k, l]) => `<option value="${k}" ${k === type ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+      <label>Scored by<select name="b_scoring"><option value="">Same as the round</option>${GAME_OPTIONS.map(([v, l]) => `<option value="${v}" ${b.scoring === v ? "selected" : ""}>${l}</option>`).join("")}</select></label></div>
+    <div class="betin">${inp("front", "Front 9")}${inp("back", "Back 9")}${inp("game", holes === 9 ? "9 holes" : "Game")}
+      <label data-seg="pot"><span class="blbl">Buy-in each</span><span class="dollar"><input name="b_pot" inputmode="decimal" value="${b.pot ?? POT_DEFAULT}" aria-label="Pot buy-in in dollars"></span></label></div></div>
+    <p class="hint betnote" ${on ? "" : "hidden"}>${BET_NOTE[type]}</p></div>`;
 }
 function wireBets(root, holes) {
   const box = root.querySelector(".betbox"); if (!box) return;
   const sync = h => {
-    const on = box.querySelector("[name=beton]").checked;
-    box.querySelector(".betin").hidden = !on; box.querySelector(".betnote").hidden = !on;
-    box.querySelectorAll("[data-seg=front],[data-seg=back]").forEach(x => x.hidden = h === 9);
+    const on = box.querySelector("[name=beton]").checked, pot = box.dataset.type === "pot";
+    box.querySelector(".betwrap").hidden = !on; box.querySelector(".betnote").hidden = !on;
+    box.querySelector(".betnote").textContent = BET_NOTE[pot ? "pot" : "nassau"];
+    box.querySelectorAll("[data-seg=front],[data-seg=back]").forEach(x => x.hidden = pot || h === 9);
+    box.querySelector("[data-seg=game]").hidden = pot;
+    box.querySelector("[data-seg=pot]").hidden = !pot;
     box.querySelector("[data-seg=game] .blbl").textContent = h === 9 ? "9 holes" : "Game";
     box.dataset.holes = h;
   };
   box.querySelector("[name=beton]").onchange = () => sync(Number(box.dataset.holes));
+  box.querySelector("[name=b_type]").onchange = e => { box.dataset.type = e.target.value; sync(Number(box.dataset.holes)); };
   sync(holes);
   return sync;
 }
@@ -1464,10 +1531,16 @@ function readBets(root, holes, presses = []) {
   const box = root.querySelector(".betbox");
   if (!box || !box.querySelector("[name=beton]").checked) return null;
   const v = k => { const s = box.querySelector(`[name=b_${k}]`).value.replace(/[$\s]/g, ""); return s === "" ? 0 : Number(s); };
+  const sc = box.querySelector("[name=b_scoring]").value, scoring = sc ? { scoring: sc } : {};
+  if (box.dataset.type === "pot") {
+    const pot = v("pot");
+    if (isNaN(pot) || pot < 0 || pot > 10000) { toast("The buy-in is a dollar amount."); return false; }
+    return pot ? { type: "pot", pot, ...scoring } : null;
+  }
   const b = { front: holes === 18 ? v("front") : 0, back: holes === 18 ? v("back") : 0, game: v("game") };
   if (Object.values(b).some(x => isNaN(x) || x < 0 || x > 10000)) { toast("Bets are dollar amounts."); return false; }
   if (!b.front && !b.back && !b.game) return null;
-  return { ...b, presses };
+  return { ...b, presses, ...scoring };
 }
 async function saveBets(card, bets) {
   if (!DEMO) await save("cards", { bets }, card.id);
@@ -1489,9 +1562,9 @@ function betsForm(id) {
   });
 }
 function pressForm(id) {
-  const card = cardById(id); if (!card || !card.bets) return;
+  const card = cardById(id); if (!card || !card.bets || card.bets.type === "pot") return;
   if (!editing()) return phraseForm(() => pressForm(id));
-  const n = card.pars.length, pops = matchPops(card);
+  const n = card.pars.length, pops = moneyPops(card);
   const hole = Math.min(n - 1, Number(localStorage.getItem("golf_hole_" + id) ?? firstOpenHole(card)));
   const segs = n === 18 ? (hole < 9 ? ["front", "game"] : ["back", "game"]) : ["game"];
   const pairs = pairsOf(bettors(card));
@@ -2420,7 +2493,7 @@ function finishForm(id) {
       ${courseFields({ ...card, par: n === 18 ? parSum : card.par || parSum })}
       <div class="board">${rows.map(x => `<div class="br"><span>${dot(x.s)}${esc(pname(x.s))}</span><span class="n">${x.t.done ? `<b>${x.t.gross}</b> ${fmtToPar(x.t.toPar)} · ${cardPts(card, x.s).pts} pts` : `<span class="warnt">${x.t.thru}/${n} holes, won't be posted</span>`}</span></div>`).join("")}</div>
       ${card.players.length > 1 ? `<div class="mpl">${cardPairs(card).map(pr => `<div class="mpr"><span>${esc(pname(pr.a))} v ${esc(pname(pr.b))}</span><b>${esc(pr.text)}</b></div>`).join("")}</div>` : ""}
-      ${bet ? `<div class="cbets"><span>Money</span><b>${bet.pays.length ? paysText(bet.pays) : "Nobody pays"}</b></div>${bet.done ? "" : `<p class="hint">Bets that didn't finish push.</p>`}` : ""}
+      ${bet ? `<div class="cbets"><span>Money</span><b>${bet.pays.length ? paysText(bet.pays) : "Nobody pays"}</b></div>${bet.done ? "" : `<p class="hint">${bet.pot ? "The pot only pays once everyone in it finishes every hole, so it pushes." : "Bets that didn't finish push."}</p>`}` : ""}
       <p class="hint">Each finished score goes on that player's round log${card.match_id ? " and the match gets its result" : ""}.${n === 9 ? " 9-hole rounds don't count toward handicaps." : ""}${card.players.some(isGuest) ? " Guests go on the scorecard only." : ""}</p>
       <div class="acts"><button class="primary" type="submit">Submit round</button><button type="button" data-close>Keep playing</button></div>
     </form>`, m => {

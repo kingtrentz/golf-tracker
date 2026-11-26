@@ -5,7 +5,7 @@
 window.GOLF_CONFIG = {
   siteTitle: "The McGrath Masters",
   tagline: "Trent vs Logan vs Dad",
-  supabaseUrl: "https://vqgyeqrjvghrzxrirkff.supabase.co",
+  supabaseUrl: "",
   supabaseAnonKey: "sb_publishable_pS1HaPnUl9XG3E9uusrQHw_cbul3r1I",
   // Course a club opens on when it has more than one (otherwise the one played most).
   defaultCourses: { "Hermitage Golf Course": "General's Retreat" },

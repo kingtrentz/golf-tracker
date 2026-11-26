@@ -72,6 +72,13 @@
 <button id="totop" class="totop" type="button" aria-label="Return to top" hidden>↑ Top</button>
 <div id="modal" class="modal" hidden></div>
 <div id="toast" class="toast" hidden></div>
+<script>
+// PREVIEW ONLY: phrase set, fake GPS (tee, then 267 yds, then 314 yds, repeating).
+localStorage.setItem("golf_phrase", "demo");
+(function () { let k = 0; const d = [0, 0.0022, 0.0026];
+  Object.defineProperty(navigator, "geolocation", { value: { getCurrentPosition: ok => setTimeout(() => ok({ coords: { latitude: 36.9 + d[k++ % 3], longitude: -86.4, accuracy: 5 } }), 300), watchPosition() { return 0; }, clearWatch() {} } });
+})();
+</script>
 <script src="config.js?v=202611240410"></script>
 <script src="demo.js?v=202611261300"></script>
 <script type="module" src="app.js?v=202611271100"></script>

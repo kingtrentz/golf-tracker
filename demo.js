@@ -39,5 +39,8 @@ window.GOLF_DEMO = (function () {
     tee_name: "White", rating: 70.1, slope: 124, par: 72, players: ["trent", "logan"], status: "scheduled",
     scoring: "gross", title_match: false, notes: "" });
   const guests = [{ id: "demo-g1", first_name: "Sam", last_name: "Sample", handicap: 14.2 }];
-  return { courses, rounds, matches, guests };
+  const pars = [4, 5, 3, 4, 4, 3, 5, 4, 4, 4, 5, 3, 4, 4, 3, 5, 4, 4];
+  const cards = [{ id: "pv1", played_on: "2026-11-26", course_name: "Sample Links", tee_name: "White", rating: 70.1, slope: 124, par: 72,
+    pars, sis: [], players: ["trent", "dad", "logan"], scores: { __meta: { game: "match" } }, status: "live", scoring: "match" }];
+  return { courses, rounds, matches, guests, cards };
 })();

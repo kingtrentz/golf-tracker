@@ -451,10 +451,6 @@ button.primary.big { width: 100%; padding: 14px; font-size: 17px; }
 .endwrap { margin: -4px 0 12px; }
 .endbtn { width: 100%; padding: 12px; font-weight: 700; background: transparent; border: 1px solid var(--gold-line); color: var(--gold); border-radius: 12px; }
 
-/* theme toggle */
-.topbtns { display: flex; gap: 8px; align-items: center; }
-.themebtn { width: 36px; height: 34px; padding: 0; font-size: 16px; line-height: 1; background: transparent; }
-
 /* bets + money */
 .betbox { margin-bottom: 8px; }
 .betin { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 8px; margin-top: 6px; }
@@ -686,11 +682,12 @@ button.lcourse.add { font-size: 15px; background: var(--gold-bg); border: 1px so
 .pctown { display: grid; grid-template-columns: minmax(0, 1fr) 74px auto; gap: 6px; margin-bottom: 6px; }
 .pctown select { padding: 10px 6px; }
 .pctown .pcgo { padding: 0 14px; font-weight: 700; }
-/* Header title centered: shell, THE, name, tagline stacked in the middle; theme button pinned right */
+/* Header title centered: shell, THE, name, tagline stacked in the middle */
 header .top { position: relative; justify-content: center; text-align: center; }
 header .top > div:first-child { padding: 0 44px; }
-header .topbtns { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
 header h1:has(.tw)::before { display: block; margin: 0 auto 3px; width: 40px; height: 20px; }
+/* The shell is double-tapped to switch modes: no double-tap zoom, no text selection */
+header h1#title { touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
 
 /* Scorecard: hole handicap row, course handicap by each name, net under the total */
 .sc tr.hcp td { color: var(--muted); font-size: 10.5px; font-weight: 500; }

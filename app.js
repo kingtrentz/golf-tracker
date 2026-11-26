@@ -1918,9 +1918,16 @@ function cardStory(card) {
     else head = `${pname(lead)} ${u} up thru ${pr.thru}. ${u === 1 ? "Tight one." : "Still a match."}`;
   } else if (pairs.length > 1) {
     const ahead = P.find(s => pairs.filter(pr => pr.a === s || pr.b === s).every(pr => pr.winner === s || (!pr.done && ((pr.a === s && pr.up > 0) || (pr.b === s && pr.up < 0)))));
-    if (pairs.every(pr => pr.done)) head = ahead ? `${pname(ahead)} swept both matches.` : `Matches done. ${pname(ptsLead[0])} won on points with ${pts[ptsLead[0]].pts}.`;
-    else if (ahead) head = `${pname(ahead)} is dominating, up in both matches thru ${thruAll}.`;
-    else head = `${pname(ptsLead[0])} leads on points with ${pts[ptsLead[0]].pts} thru ${thruAll}. Matches are up for grabs.`;
+    // Match play text: matches won or currently up per player (points stay in the table only).
+    const mine = s => pairs.filter(pr => pr.a === s || pr.b === s);
+    const upIn = s => mine(s).filter(pr => pr.winner === s || (!pr.winner && ((pr.a === s && pr.up > 0) || (pr.b === s && pr.up < 0)))).length;
+    const all = s => mine(s).length === 2 ? "both" : `all ${mine(s).length}`;
+    const byUp = [...P].sort((a, b) => upIn(b) - upIn(a)), top = upIn(byUp[0]), tied = byUp.filter(s => upIn(s) === top);
+    if (pairs.every(pr => pr.done)) head = ahead ? `${pname(ahead)} swept ${all(ahead)} matches.` : top && tied.length === 1 ? `Matches done. ${pname(byUp[0])} won ${top} of ${mine(byUp[0]).length}.` : "Matches done and split.";
+    else if (ahead) head = `${pname(ahead)} is dominating, up in ${all(ahead)} matches thru ${thruAll}.`;
+    else if (!top) head = `Every match is all square thru ${thruAll}.`;
+    else if (tied.length === 1) head = `${pname(byUp[0])} is up in ${top} of ${mine(byUp[0]).length} matches thru ${thruAll}.`;
+    else head = `Matches are split thru ${thruAll}. Up for grabs.`;
   } else head = `${pts[P[0]].pts} points thru ${thruAll}.`;
   return { head, moments, pairs, pts, thruAll };
 }
@@ -2035,10 +2042,20 @@ function viewCard(id) {
     ${hl.length > 6 ? `<details><summary class="muted small">Show all ${hl.length}</summary><div class="moments">${hl.slice(6).map(m => `<div class="mom ${m.kind}"><span class="mh2">${m.i < n ? m.i + 1 : "F"}</span>${esc(m.text)}</div>`).join("")}</div></details>` : ""}</section>` : "";
 
   const endBtn = ed ? `<div class="endwrap"><button class="endbtn" data-act="finish" data-id="${id}">${card.players.every(p => cardTotals(card, p).done) ? "Submit round" : "End round"}</button></div>` : "";
-  return `${ed ? entry + standings + endBtn : top + entry + endBtn}${highlights}
-  <section class="card"><h3>Scorecard</h3>${grid(0)}${grid(1)}
-    <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span><span><i class="popk"></i>stroke hole</span><span>small number by a name = course handicap</span><span><i class="wonk"></i>won the hole</span></div></section>${betsBox(card)}
-  <div class="ed acts center"><button class="link" data-act="cardsc" data-id="${id}">Edit scorecard</button><button class="link" data-act="card-del" data-id="${id}">Delete scorecard</button></div>`;
+  const scard = `<section class="card"><h3>Scorecard</h3>${grid(0)}${grid(1)}
+    <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span><span><i class="popk"></i>stroke hole</span><span>small number by a name = course handicap</span><span><i class="wonk"></i>won the hole</span></div></section>`;
+  const scLinks = `<div class="ed acts center"><button class="link" data-act="cardsc" data-id="${id}">Edit scorecard</button><button class="link" data-act="card-del" data-id="${id}">Delete scorecard</button></div>`;
+  const bets = betsBox(card);
+  if (ed) {
+    // Scoring view in tabs. Game (hole, map, scores, standings) is the default and stays put after
+    // each score; tapping a hole on the scorecard jumps back to Game. Bets only when there are any.
+    let tab = viewCard._tabFor === id ? viewCard._tab : "game";
+    if (tab === "bets" && !bets) tab = "game";
+    const tabs = [["game", "Game"], ["card", "Scorecard"], ...(bets ? [["bets", "Bets"]] : [])];
+    const bar = `<div class="ctabs">${tabs.map(([k, l]) => `<button type="button" class="${k === tab ? "on" : ""}" data-act="ctab" data-v="${k}">${l}</button>`).join("")}</div>`;
+    return bar + (tab === "card" ? scard + scLinks : tab === "bets" ? bets : entry + standings + endBtn);
+  }
+  return `${top + entry + endBtn}${highlights}${scard}${bets}${scLinks}`;
 }
 const scoreCls = (v, par) => v < par - 1 ? "sc-e" : v === par - 1 ? "sc-b" : v === par ? "sc-p" : v === par + 1 ? "sc-o" : "sc-d";
 function firstOpenHole(card) {
@@ -2049,6 +2066,7 @@ function firstOpenHole(card) {
 
 const ADV_MS = 1600, HOLE_SETTLE_MS = 450;
 function goHole(id, h) {
+  viewCard._tab = "game"; viewCard._tabFor = id;
   clearTimeout(cardAction._adv); cardAction._advFor = null; cardAction._moved = Date.now();
   localStorage.setItem("golf_hole_" + id, h); render();
 }
@@ -2059,6 +2077,7 @@ function cardAction(act, b) {
   // taps meant for the old hole don't land on the new one or skip a hole.
   if ((act === "hole" || act === "sc") && Date.now() - (cardAction._moved || 0) < HOLE_SETTLE_MS) return;
   if (act === "hole") { goHole(id, Number(b.dataset.v)); return; }
+  if (act === "ctab") { viewCard._tab = b.dataset.v; viewCard._tabFor = id; render(); scrollTo(0, 0); return; }
   if (!editing()) return phraseForm();
   if (act === "sc") {
     const s = b.dataset.s, d = Number(b.dataset.d);
@@ -2590,7 +2609,7 @@ document.addEventListener("click", e => {
   if (act === "guest") guestForm(id || null);
   if (act === "rsc") roundScorecardView(id);
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
-  if (["hole", "sc", "par", "theme"].includes(act)) cardAction(act, b);
+  if (["hole", "sc", "par", "theme", "ctab"].includes(act)) cardAction(act, b);
   if (act === "yds") ydToggle();
 });
 // Keep the Strokes section open or closed while the live card redraws.

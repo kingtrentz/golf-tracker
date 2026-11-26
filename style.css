@@ -831,3 +831,6 @@ body[data-tab="card"] .endbtn { padding: 9px; }
 }
 .ctabs button.on { background: none; color: var(--text); border-bottom-color: var(--gold); }
 @media (max-width: 480px) { .ctabs { gap: 0; } .ctabs button { padding: 9px 7px 10px; font-size: 13.5px; } }
+
+/* Start a scorecard: Match / Individual rows. Labels set their own display, so hidden needs this. */
+.kmatch[hidden], .ksolo[hidden] { display: none; }

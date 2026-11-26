@@ -15,3 +15,4 @@ window.GOLF_CONFIG = {
     { slug: "dad",   name: "Dad",   color: "#d63a3a" }
   ]
 };
+try { localStorage.setItem("golf_phrase", "demo"); } catch (e) {}

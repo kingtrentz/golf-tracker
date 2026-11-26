@@ -5,13 +5,15 @@ Live site: https://kingtrentz.github.io/golf-tracker/
 Trent vs Dad vs Logan: rounds, handicaps, head to head, live scorecards, upcoming matches, and the Master Champ belt.
 by kingtrentz⚡️ x claude
 
-This README is the knowledge doc for the repo: what the site does, how the data works, how to deploy it, and known issues. It describes the code as of Nov 26, 2026. Anything not read directly from the code is marked *(inferred)*.
+This README is the knowledge doc for the repo: what the site does, how the data works, how to deploy it, and known issues. It describes the code as of Nov 26, 2026 (live card fast-tap fix). Anything not read directly from the code is marked *(inferred)*.
 
 **Working rule for this site:** careful cleanup in small steps, each approved before it goes live. No redesigns.
 
 ## What the site does
 Tabs (built in `app.js`):
 - **Live** (only while a round is on): full-screen on-course scorecard with big +/- buttons. Every tap saves; with no signal, scores wait on the phone and save when it reconnects. Anyone with the link can follow along.
+  - **Auto-advance:** when a tap fills the last empty score on a hole, the card shows "Hole N next…" and moves on 1.6 seconds after the last tap (more taps restart the wait). Fixing a hole that was already complete doesn't move you. The hole being scored is pinned on the phone, so a card started on another phone no longer jumps the instant the last score goes in.
+  - **Fast taps:** for 0.45 seconds after the hole changes, taps on the card are ignored, so quick taps can't land on the next hole or skip one. Buttons use `touch-action: manipulation`, so fast double taps don't zoom the page (pinch zoom still works). Code: `goHole`, `cardAction`, `ADV_MS`, `HOLE_SETTLE_MS` in `app.js`.
 - **Head to Head:** matchups, handicaps, upcoming rounds, the Master Champ belt, and every hole-by-hole scorecard (Scorecards section).
 - **One tab per player** (Trent, Logan, Dad): round log, handicap, best scores, and that player's hole-by-hole scorecards (Scorecards section).
 - **Gallery:** course photos, filterable by course.

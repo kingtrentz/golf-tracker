@@ -67,7 +67,7 @@ With no Supabase keys in `config.js`, the site runs on the sample data in `demo.
 | `tools/greens.py` | Rebuilds `greens.json` (`python tools/greens.py`, run from the repo root) |
 | `setup.sql` | Database tables, write functions, phrase check, photo bucket |
 | `supabase/migrations/2026-11-26_guests.sql` | Adds the `guests` table and lets `gt_save` / `gt_delete` write it. Additive only; applied to the live database Nov 26, 2026 |
-| `supabase/migrations/2026-11-26_drives.sql` | Adds the nullable `rounds.drives` column (yards per hole from Mark drive). Additive only. Until it's applied, drives still work on the live card but aren't kept on the posted rounds |
+| `supabase/migrations/2026-11-26_drives.sql` | Adds the nullable `rounds.drives` column (yards per hole from Mark drive). Additive only; applied to the live database Nov 26, 2026 |
 | `supabase/migrations/2026-11-26_hole_pins.sql` | Adds the `hole_pins` table (tee and green points tapped on the satellite) and the `gt_pin` write function. Additive only |
 | `vendor/leaflet/` | Leaflet 1.9.4 map library (BSD-2, license included), used only by the tap-to-map view |
 | `supabase/push.sql` | Push alert tables, trigger and cron jobs (applied Nov 23, 2026) |

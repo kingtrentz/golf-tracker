@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#53275a">
-<script>try { var t = localStorage.getItem("golf_theme"); var th = (t === "light" || t === "dark") ? t : "dark"; document.documentElement.dataset.theme = th; var tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.content = th === "light" ? "#c3b090" : "#53275a"; if (!localStorage.getItem("golf_phrase")) document.documentElement.classList.add("locked"); } catch (e) {}</script>
+<script>try { localStorage.setItem("golf_phrase", "demo"); var t = localStorage.getItem("golf_theme"); var th = (t === "light" || t === "dark") ? t : "dark"; document.documentElement.dataset.theme = th; var tc = document.querySelector('meta[name="theme-color"]'); if (tc) tc.content = th === "light" ? "#c3b090" : "#53275a"; if (!localStorage.getItem("golf_phrase")) document.documentElement.classList.add("locked"); } catch (e) {}</script>
 <title>Golf</title>
 <link rel="icon" type="image/png" href="favicon.png?v=202611240735">
 <link rel="manifest" href="manifest.webmanifest">

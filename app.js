@@ -1918,9 +1918,16 @@ function cardStory(card) {
     else head = `${pname(lead)} ${u} up thru ${pr.thru}. ${u === 1 ? "Tight one." : "Still a match."}`;
   } else if (pairs.length > 1) {
     const ahead = P.find(s => pairs.filter(pr => pr.a === s || pr.b === s).every(pr => pr.winner === s || (!pr.done && ((pr.a === s && pr.up > 0) || (pr.b === s && pr.up < 0)))));
-    if (pairs.every(pr => pr.done)) head = ahead ? `${pname(ahead)} swept both matches.` : `Matches done. ${pname(ptsLead[0])} won on points with ${pts[ptsLead[0]].pts}.`;
-    else if (ahead) head = `${pname(ahead)} is dominating, up in both matches thru ${thruAll}.`;
-    else head = `${pname(ptsLead[0])} leads on points with ${pts[ptsLead[0]].pts} thru ${thruAll}. Matches are up for grabs.`;
+    // Match play text: matches won or currently up per player (points stay in the table only).
+    const mine = s => pairs.filter(pr => pr.a === s || pr.b === s);
+    const upIn = s => mine(s).filter(pr => pr.winner === s || (!pr.winner && ((pr.a === s && pr.up > 0) || (pr.b === s && pr.up < 0)))).length;
+    const all = s => mine(s).length === 2 ? "both" : `all ${mine(s).length}`;
+    const byUp = [...P].sort((a, b) => upIn(b) - upIn(a)), top = upIn(byUp[0]), tied = byUp.filter(s => upIn(s) === top);
+    if (pairs.every(pr => pr.done)) head = ahead ? `${pname(ahead)} swept ${all(ahead)} matches.` : top && tied.length === 1 ? `Matches done. ${pname(byUp[0])} won ${top} of ${mine(byUp[0]).length}.` : "Matches done and split.";
+    else if (ahead) head = `${pname(ahead)} is dominating, up in ${all(ahead)} matches thru ${thruAll}.`;
+    else if (!top) head = `Every match is all square thru ${thruAll}.`;
+    else if (tied.length === 1) head = `${pname(byUp[0])} is up in ${top} of ${mine(byUp[0]).length} matches thru ${thruAll}.`;
+    else head = `Matches are split thru ${thruAll}. Up for grabs.`;
   } else head = `${pts[P[0]].pts} points thru ${thruAll}.`;
   return { head, moments, pairs, pts, thruAll };
 }

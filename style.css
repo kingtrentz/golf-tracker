@@ -840,7 +840,10 @@ body[data-tab="card"] .endbtn { padding: 9px; }
 .mapme span { font-size: 12px; color: var(--muted); }
 .warnt[data-unmapped]:empty { display: none; }
 .pin-sheet { padding: 14px 14px 18px; }
-.pin-sheet h2 { margin: 0 0 2px; font-size: 17px; padding-right: 28px; }
+.pin-sheet h2 { margin: 0; font-size: 17px; flex: 1; text-align: center; }
+.pinnav { display: flex; align-items: center; gap: 8px; margin: 0 34px 2px 0; }
+.pinarr { width: 40px; height: 36px; padding: 0; border-radius: 10px; font-size: 22px; line-height: 1; }
+.pin-sheet .pinleft { margin: 2px 0 2px; text-align: center; font-size: 12.5px; }
 .pin-sheet .pinstep { margin: 0 0 8px; }
 .pinmodes { margin-bottom: 8px; }
 .pinmodes button { padding: 6px 14px; border-radius: 99px; font-size: 13px; }

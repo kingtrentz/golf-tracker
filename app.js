@@ -470,7 +470,7 @@ function viewPlayer(slug) {
     const m = r.match_id ? state.matches.find(x => x.id === r.match_id) : null;
     return `<tr>
       <td>${fmtShort(r.played_on)}<div class="yr">${r.played_on.slice(0, 4)}</div></td>
-      <td>${esc(r.course_name)}${r.tee_name ? `<span class="tee">${esc(r.tee_name)}</span>` : ""}${m ? `<span class="tag">match</span>` : ""}${r.holes === 9 ? `<span class="tag">9 holes</span>` : ""}${r.hole_scores ? `<span class="tag">hole by hole</span>` : ""}${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ""}</td>
+      <td>${esc(r.course_name)}${r.tee_name ? `<span class="tee">${esc(r.tee_name)}</span>` : ""}${m ? `<span class="tag">match</span>` : ""}${r.holes === 9 ? `<span class="tag">9 holes</span>` : ""}${r.hole_scores?.length ? `<button type="button" class="tag tagbtn" data-act="rsc" data-id="${r.id}">hole by hole ›</button>` : ""}${r.notes ? `<div class="note">${esc(r.notes)}</div>` : ""}</td>
       <td class="n"><b>${r.score}</b><div class="yr">${toPar(r.score, r.par)}${r.points != null ? ` · ${r.points} pts` : ""}</div></td>
       <td class="n">${countsForIndex(r) ? `${diffOf(r).toFixed(1)}<div class="yr">hcp ${fmtIdx(hc.after[r.id])}</div>` : "–"}</td>
       <td class="ed"><button class="link" data-act="edit-round" data-id="${r.id}">Edit</button></td></tr>`;
@@ -492,6 +492,7 @@ function viewPlayer(slug) {
   </div>
   <section class="card"><h3>Handicap over time</h3>${lineChart([{ name: p.name, color: p.color, points: indexHistory(slug) }])}</section>
   <section class="card"><h3>Courses</h3>${courseRows ? `<table class="t"><thead><tr><th>Course</th><th class="n">Rds</th><th class="n">Best</th><th class="n">Avg</th></tr></thead><tbody>${courseRows}</tbody></table>` : `<div class="empty">No rounds yet.</div>`}</section>
+  ${roundScorecardsSection(slug)}
   <section class="card"><h3>Round log</h3>
     <p class="hint">Diff = how the round played against the course (score minus rating, adjusted for slope). After every 18-hole round the handicap moves ${Math.round(STEP * 100)}% of the way toward it.</p>
     ${logRows ? `<table class="t log"><thead><tr><th>Date</th><th>Course</th><th class="n">Score</th><th class="n">Diff</th><th class="ed"></th></tr></thead><tbody>${logRows}</tbody></table>` : `<div class="empty">No rounds yet.</div>`}
@@ -586,6 +587,7 @@ function viewH2H() {
   <section class="card"><h3>Head to head</h3><p class="hint">Every final match counts, scored the way it was set up (net or gross).</p>${recs}</section>
   ${calc}
   <section class="card"><h3>Results</h3>${pastRows || `<div class="empty">No results yet.</div>`}</section>
+  ${roundScorecardsSection()}
   ${scorecardsSection()}`;
 }
 
@@ -2021,6 +2023,62 @@ function scorecardsSection() {
     <p class="hint">Tap Enter scores to edit.</p></details></section>`;
 }
 
+// ---------- round scorecards (hole by hole, read only) ----------
+// Rounds posted from a live card keep hole_scores. Rounds of the same match (or same day,
+// course and tee) are grouped into one scorecard. Pars come from the saved course.
+function rscPars(r) {
+  const n = r.hole_scores?.length;
+  const c = state.courses.find(x => x.id === r.course_id && x.pars?.length === n)
+    || state.courses.find(x => x.name === r.course_name && x.pars?.length === n);
+  return c ? c.pars : null;
+}
+function rscGroups(slug) {
+  const groups = {};
+  for (const r of state.rounds) {
+    if (!r.hole_scores?.length) continue;
+    const k = r.match_id || `${r.played_on}|${r.course_name}|${r.tee_name || ""}`;
+    (groups[k] ||= { key: k, played_on: r.played_on, course_name: r.course_name, tee_name: r.tee_name, rounds: [] }).rounds.push(r);
+  }
+  const order = s => { const i = PLAYERS.findIndex(p => p.slug === s); return i < 0 ? 99 : i; };
+  return Object.values(groups)
+    .filter(g => !slug || g.rounds.some(r => r.player === slug))
+    .map(g => ({ ...g, rounds: g.rounds.sort((a, b) => (b.player === slug) - (a.player === slug) || order(a.player) - order(b.player)) }))
+    .sort((a, b) => b.played_on.localeCompare(a.played_on) || String(b.rounds[0].created_at || "").localeCompare(String(a.rounds[0].created_at || "")));
+}
+function roundScorecardsSection(slug) {
+  const gs = rscGroups(slug);
+  const row = g => `<button type="button" class="rscrow" data-act="rsc" data-id="${g.rounds.find(r => r.player === slug)?.id || g.rounds[0].id}">
+      <span class="rscw"><b>${fmtShort(g.played_on)}</b> <span class="muted">${g.played_on.slice(0, 4)}</span> · ${esc(g.course_name)}${g.tee_name ? `<span class="tee">${esc(g.tee_name)}</span>` : ""}
+        <span class="rscp">${g.rounds.map(r => `<span>${dot(r.player)}${esc(pname(r.player))} <b>${r.score}</b></span>`).join("")}</span></span>
+      <span class="rscgo">View ›</span></button>`;
+  const first = gs.slice(0, 5).map(row).join(""), rest = gs.slice(5).map(row).join("");
+  return `<section class="card"><h3>Scorecards <span class="muted small">${gs.length}</span></h3>
+    ${gs.length ? `${first}${rest ? `<details><summary class="muted small">Show all ${gs.length}</summary>${rest}</details>` : ""}` : `<div class="empty">No hole-by-hole scorecards yet.</div>`}
+    <p class="hint">Rounds scored on a live scorecard show here hole by hole. Rounds posted as a final score only don't have one.</p></section>`;
+}
+function roundScorecardView(id) {
+  const r0 = state.rounds.find(r => r.id === id); if (!r0) return;
+  const g = rscGroups().find(x => x.rounds.some(r => r.id === id)); if (!g) return;
+  const rounds = [r0, ...g.rounds.filter(r => r.id !== id)];
+  const n = Math.max(...rounds.map(r => r.hole_scores.length));
+  const pars = rscPars(r0);
+  const sum = arr => arr.reduce((a, b) => a + (b ?? 0), 0);
+  const grid = half => {
+    const idx = half === 0 ? [...Array(Math.min(9, n)).keys()] : [...Array(Math.max(0, n - 9)).keys()].map(i => i + 9);
+    if (!idx.length) return "";
+    return `<table class="sc"><thead><tr><th>${half === 0 ? "Out" : "In"}</th>${idx.map(i => `<th>${i + 1}</th>`).join("")}<th>Tot</th></tr>
+      ${pars ? `<tr class="par"><td>Par</td>${idx.map(i => `<td>${pars[i]}</td>`).join("")}<td>${sum(idx.map(i => pars[i]))}</td></tr>` : ""}</thead>
+      <tbody>${rounds.map(r => { const v = r.hole_scores, got = idx.filter(i => v[i] != null);
+        return `<tr><td>${dot(r.player)}${esc(pname(r.player).slice(0, 5))}</td>${idx.map(i => `<td><span class="${v[i] == null || !pars ? "" : scoreCls(v[i], pars[i])}">${v[i] ?? "–"}</span></td>`).join("")}<td><b>${got.length ? sum(got.map(i => v[i])) : ""}</b></td></tr>`; }).join("")}</tbody></table>`;
+  };
+  const totals = rounds.map(r => `<div class="mpr"><span>${dot(r.player)}${esc(pname(r.player))}</span><b>${r.score} <span class="muted">${toPar(r.score, r.par)}${r.points != null ? ` · ${r.points} pts` : ""}</span></b></div>`).join("");
+  openModal(`<h2>${esc(g.course_name)}</h2>
+    <p class="muted small rscsub">${fmtDate(g.played_on)}${g.tee_name ? ` · ${esc(g.tee_name)} tees` : ""}${pars ? ` · par ${sum(pars)}` : ""}${r0.match_id ? " · match" : ""}</p>
+    ${grid(0)}${grid(1)}
+    ${pars ? `<div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span></div>` : `<p class="hint">No hole pars saved for this course, so holes aren't marked.</p>`}
+    <div class="mpl">${totals}</div>`);
+}
+
 // ---------- start match: pick tees, then straight to the Live tab ----------
 function startMatch(mt) {
   if (!mt) return;
@@ -2249,6 +2307,7 @@ document.addEventListener("click", e => {
   if (act === "unpress") unpress(id, Number(b.dataset.v));
   if (act === "money") moneyForm(state.matches.find(m => m.id === id));
   if (act === "course-sc") courseScorecard(id);
+  if (act === "rsc") roundScorecardView(id);
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
   if (["hole", "sc", "par", "theme"].includes(act)) cardAction(act, b);
   if (act === "yds") ydToggle();

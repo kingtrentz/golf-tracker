@@ -760,3 +760,11 @@ body[data-tab="card"] .totop, body[data-tab="card"] .abyss { display: none !impo
 .abyss-reveal img { width: min(100%, 300px); height: auto; border-radius: 16px; border: 1px solid var(--line); box-shadow: 0 12px 32px var(--shadow); }
 .abyss-top { padding: 10px 18px; border-radius: 999px; }
 @keyframes abyssIn { from { opacity: 0; transform: translateY(24px) scale(.95); } to { opacity: 1; transform: translateY(0) scale(1); } }
+
+/* Round scorecards (hole by hole, read only): list rows on Head to Head and player tabs, opens in a sheet */
+.rscrow { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 10px; padding: 10px 0; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: none; color: inherit; font: inherit; font-size: 13.5px; text-align: left; cursor: pointer; }
+.rscw { min-width: 0; }
+.rscp { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 3px; font-size: 12.5px; color: var(--text-2); }
+.rscgo { flex: none; color: var(--gold); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.tagbtn { background: none; font: inherit; font-size: 11px; cursor: pointer; color: var(--gold); border-color: var(--gold-line); }
+.rscsub { margin: -8px 0 12px; padding: 0; }

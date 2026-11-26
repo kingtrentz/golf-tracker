@@ -550,8 +550,8 @@ body[data-tab="card"] #ocmenu { display: inline-flex; position: absolute; left: 
 .oc-menu:active { opacity: .7; }
 .lt-course { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 body[data-tab="card"] .live-top .headline { text-align: center; text-wrap: balance; font-size: clamp(15px, 4.1vw, 20px); line-height: 1.25; margin-top: 8px; }
-body[data-tab="card"] .step { min-width: 56px; height: 56px; font-size: 28px; }
-body[data-tab="card"] .val { min-width: 58px; height: 56px; font-size: 26px; }
+body[data-tab="card"] .step { min-width: 46px; height: 44px; font-size: 24px; }
+body[data-tab="card"] .val { min-width: 50px; height: 44px; font-size: 22px; }
 /* Clubhouse palette (Nov 24): dark = hand-stained prune Chesterfield + burnished champagne brass, light = tufted sand suede + walnut brass. */
 :root, html[data-theme="dark"] {
   --bg: #150c17; --surface: #231326; --surface-2: #301b34; --line: #482c4e;
@@ -783,3 +783,40 @@ body[data-tab="card"] .totop, body[data-tab="card"] .abyss { display: none !impo
 .dot.gdot { background: transparent !important; box-shadow: inset 0 0 0 2px #8a8f98; }
 .solostart { margin: 4px 0 12px; }
 .solostart .primary { width: 100%; justify-content: center; }
+
+/* Live card, one screen (Nov 26): hole info, map, every score row and the standings table fit on a phone without scrolling. */
+body[data-tab="card"] main { padding-top: 8px; }
+body[data-tab="card"] .card { padding: 10px 12px; margin-bottom: 8px; }
+body[data-tab="card"] .card.hole .hhead { margin-bottom: 2px; gap: 6px; }
+body[data-tab="card"] .card.hole .nav { width: 40px; height: 40px; font-size: 22px; }
+body[data-tab="card"] .card.hole .hn { font-size: 21px; }
+body[data-tab="card"] .card.hole .parbtn { font-size: 13px; padding: 0 4px; }
+body[data-tab="card"] .card.hole button.yds { margin-top: 3px; padding: 3px 12px; }
+body[data-tab="card"] .card.hole button.yds b { font-size: 17px; }
+body[data-tab="card"] .card.hole .popline { font-size: 12px; margin-top: 1px; }
+body[data-tab="card"] .card.hole .satwrap { margin: 6px 0 4px; }
+body[data-tab="card"] .card.hole .satcv { height: 86px; }
+body[data-tab="card"] .card.hole .hnote { margin: 0 4px 4px; font-size: 12px; }
+body[data-tab="card"] .prow { grid-template-columns: 1fr 46px 50px 46px; gap: 6px; padding: 4px 0; }
+body[data-tab="card"] .pn { font-size: 15px; line-height: 1.2; }
+body[data-tab="card"] .ps { font-size: 11px; }
+body[data-tab="card"] .hfoot { margin-top: 6px; }
+body[data-tab="card"] .hfoot .primary { padding: 8px 14px; }
+body[data-tab="card"] .live-top .lt-meta { font-size: 12px; }
+body[data-tab="card"] .lbcard .headline { font-size: clamp(14px, 3.8vw, 17px); margin: 4px 0 2px; }
+body[data-tab="card"] .lbcard .latest { margin: 2px 0 0; font-size: 12px; text-align: center; }
+body[data-tab="card"] .strokesd { margin-top: 4px; }
+body[data-tab="card"] .endwrap { margin: 0 0 8px; }
+body[data-tab="card"] .endbtn { padding: 9px; }
+.stbl { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; font-variant-numeric: tabular-nums; table-layout: auto; }
+.stbl th { font-size: 11px; font-weight: 700; color: var(--muted); text-align: center; padding: 2px 3px 4px; white-space: nowrap; }
+.stbl th .dot { width: 7px; height: 7px; margin-right: 3px; vertical-align: 1px; }
+.stbl td { text-align: center; padding: 5px 3px; border-top: 1px solid var(--line); white-space: nowrap; }
+.stbl td.stn { text-align: left; font-weight: 650; font-size: 14px; max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
+.stbl td.stn .dot { width: 8px; height: 8px; margin-right: 5px; }
+.stbl td.stn .mchip { margin-left: 5px; font-size: 10px; padding: 1px 5px; }
+.stbl td.sts b, .stbl td.stp b { font-size: 15px; }
+.stbl td.sts small { color: var(--muted); font-size: 11px; margin-left: 3px; }
+.stbl td.mx-self { background: color-mix(in srgb, var(--line) 35%, transparent); }
+.stbl td.mx-up { color: var(--good-text); font-weight: 700; }
+.stbl td.mx-dn { color: var(--text-2); }

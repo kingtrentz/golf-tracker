@@ -5,21 +5,22 @@ Live site: https://kingtrentz.github.io/golf-tracker/
 Trent vs Dad vs Logan: rounds, handicaps, head to head, live scorecards, upcoming matches, and the Master Champ belt.
 by kingtrentz⚡️ x claude
 
-This README is the knowledge doc for the repo: what the site does, how the data works, how to deploy it, and known issues. It describes the code as of Nov 25, 2026. Anything not read directly from the code is marked *(inferred)*.
+This README is the knowledge doc for the repo: what the site does, how the data works, how to deploy it, and known issues. It describes the code as of Nov 26, 2026. Anything not read directly from the code is marked *(inferred)*.
 
 **Working rule for this site:** careful cleanup in small steps, each approved before it goes live. No redesigns.
 
 ## What the site does
 Tabs (built in `app.js`):
 - **Live** (only while a round is on): full-screen on-course scorecard with big +/- buttons. Every tap saves; with no signal, scores wait on the phone and save when it reconnects. Anyone with the link can follow along.
-- **Head to Head:** matchups, handicaps, upcoming rounds, and the Master Champ belt.
-- **One tab per player** (Trent, Logan, Dad): round log, handicap, best scores.
+- **Head to Head:** matchups, handicaps, upcoming rounds, the Master Champ belt, and every hole-by-hole scorecard (Scorecards section).
+- **One tab per player** (Trent, Logan, Dad): round log, handicap, best scores, and that player's hole-by-hole scorecards (Scorecards section).
 - **Gallery:** course photos, filterable by course.
 
 Features worth knowing:
 - **Games:** match play, stroke play (gross), net stroke play, skins, Stableford. Strokes are given off the lowest course handicap in the group, on the hardest holes. Optional per-pair bets with presses (ties push).
 - **Handicaps:** each player starts at a starting handicap; after every 18-hole round it moves 25% of the way toward that round's differential ((score - rating) x 113 / slope). `handicapStep` in `config.js` overrides the 25% (it isn't set now, so 25% applies). Unofficial, not the USGA best-8-of-20 index. The same math is copied in `supabase/functions/push/golf.ts`; keep the two in step.
 - **Master Champ:** title matches only count when all three play.
+- **Scorecards (read only):** the Scorecards section on Head to Head and each player tab lists finished rounds that have hole-by-hole scores, newest first (5 shown, the rest under Show all). Tapping one (or the "hole by hole" tag in a round log) opens the card: holes, par, each player's strokes, Out/In/Tot, final score and to par, with birdies circled and bogeys boxed. Rounds of the same match (or same day, course and tee) share one card. Data: `rounds.hole_scores`, saved when a live card is submitted; pars come from the saved course (`courses.pars`) and are left off if the course has none. Rounds posted as a final score only have no scorecard. Code: `rscGroups`, `roundScorecardsSection`, `roundScorecardView` in `app.js`.
 - **Courses near me:** uses the phone's location to list saved courses, OpenGolfAPI courses and OpenStreetMap golf courses nearby. OpenGolfAPI fills rating, slope, par and hole pars when it has them; otherwise type them once from the scorecard and the course is saved with its location.
 - **On-course yardages and hole maps:** one-tap GPS yardage, hole outlines and rough yardages, and satellite hole maps (Esri World Imagery tiles) with drag-to-measure. Green and hole outlines come from OpenStreetMap: `greens.json` for saved courses (built by `tools/greens.py`), otherwise the page asks Overpass once and caches it on the phone.
 - **Theme:** dark by default, with a Light mode toggle (saved per phone).

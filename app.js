@@ -228,12 +228,14 @@ function playerRecord(slug) {
 
 // Belt: the first title match winner takes it. The holder keeps it unless
 // someone finishes outright ahead of everyone in a title match the holder plays.
+// Only a title match where all three family players posted a round counts: two of them, guests or a solo round never move it.
 const isTitle = m => !!m.title_match && PLAYERS.every(p => m.players.includes(p.slug));
+const allPlayed = ev => PLAYERS.every(p => ev.rows.some(r => r.player === p.slug));
 function championship() {
   let holder = null, since = null, defenses = 0;
   const reigns = [];
   for (const m of state.matches.filter(m => m.status === "final" && isTitle(m)).sort(byDate)) {
-    const ev = evalMatch(m); if (!ev) continue;
+    const ev = evalMatch(m); if (!ev || !allPlayed(ev)) continue;
     if (!holder) {
       if (ev.outright) { holder = ev.outright; since = m.scheduled_for; defenses = 0; reigns.push({ player: holder, from: since, to: null, defenses: 0, won_at: m.course_name }); }
       continue;
@@ -553,7 +555,7 @@ function viewH2H() {
     ${holder ? `<div class="cn">${dot(ch.holder)} ${esc(holder.name)}</div>
       <div class="cs">Holding since ${fmtDate(ch.since)} · ${daysBetween(ch.since, today())} days · ${ch.defenses} defense${ch.defenses === 1 ? "" : "s"}</div>`
       : `<div class="cn">Vacant</div><div class="cs">The first title match crowns the champ.</div>`}
-    <details><summary>How the belt works</summary><p>Every match marked as a title match counts. The first outright winner takes the belt. After that, the champ keeps it unless someone finishes outright ahead of everyone (net, unless the match is set to gross) in a title match the champ plays. Ties go to the champ.</p></details>
+    <details><summary>How the belt works</summary><p>Every title match counts, but only when all three of you play it. Two of you, a solo round or guests never move the belt. The first outright winner takes the belt. After that, the champ keeps it unless someone finishes outright ahead of everyone (net, unless the match is set to gross) in a title match the champ plays. Ties go to the champ.</p></details>
     ${ch.reigns.length ? `<div class="reigns">${[...ch.reigns].reverse().map(r => `<div>${dot(r.player)}<b>${esc(pname(r.player))}</b> ${fmtShort(r.from)} – ${r.to ? fmtShort(r.to) : "now"} · ${r.defenses} def.</div>`).join("")}</div>` : ""}
   </section>`;
 

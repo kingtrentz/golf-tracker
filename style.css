@@ -833,11 +833,15 @@ body[data-tab="card"] .endbtn { padding: 9px; }
 @media (max-width: 480px) { .ctabs { gap: 0; } .ctabs button { padding: 9px 7px 10px; font-size: 13.5px; } }
 
 /* Hole not mapped: tap to set its tee and green on the satellite */
-.mapme { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; margin: 8px 0 6px; padding: 10px 12px; text-align: left;
-  border: 1px dashed color-mix(in srgb, var(--gold) 70%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--gold) 8%, transparent); color: inherit; }
+.mapme { width: 100%; margin: 8px 0 6px; padding: 10px 12px;
+  border: 1px dashed color-mix(in srgb, var(--gold) 70%, var(--line)); border-radius: 12px; background: color-mix(in srgb, var(--gold) 8%, transparent); }
 .mapme[hidden] { display: none; }
+button.mapme { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; color: inherit; }
+.mapme-open { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; padding: 0; text-align: left; border: 0; background: none; color: inherit; }
 .mapme b { font-size: 14px; color: var(--gold); }
 .mapme span { font-size: 12px; color: var(--muted); }
+.mapme-gps { display: flex; gap: 8px; margin-top: 8px; }
+.mapme-gps button { flex: 1; padding: 8px 6px; font-size: 13px; border-radius: 10px; }
 .warnt[data-unmapped]:empty { display: none; }
 .pin-sheet { padding: 14px 14px 18px; }
 .pin-sheet h2 { margin: 0; font-size: 17px; flex: 1; text-align: center; }

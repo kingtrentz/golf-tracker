@@ -40,12 +40,12 @@ const pname = slug => P[slug]?.name || GUESTS[slug]?.name || (isGuest(slug) ? "G
 const cardGuests = card => card?.scores?.__meta?.guests || {};
 const inMoney = (card, s) => !isGuest(s) || !!cardGuests(card)[s]?.money;
 const bettors = card => card.players.filter(s => inMoney(card, s));
-// Solo rounds: one player, started from their tab (card.scores.__meta.solo). A posted round counts as solo
-// when it has no match and nobody else (family or guest) posted a round that day at that course and tee.
+// Solo (Individual) rounds: one family player plus any guests (card.scores.__meta.solo). A posted round counts as solo
+// when it has no match and no other family player posted a round that day at that course and tee (guests can ride along).
 // Solo rounds count toward the handicap like any round; head to head, Master Champ and money only read matches.
 const cardSolo = card => card?.scores?.__meta?.solo ? card.players[0] : null;
 const roundKey = r => `${r.played_on}|${r.course_name}|${r.tee_name || ""}`;
-const isSoloRound = r => !r.match_id && ![...state.rounds, ...state.guestRounds].some(x => x.id !== r.id && roundKey(x) === roundKey(r));
+const isSoloRound = r => !r.match_id && !state.rounds.some(x => x.id !== r.id && roundKey(x) === roundKey(r));
 
 // ---------- handicap math (USGA Rules of Handicapping 5.1 / 5.2) ----------
 const diffOf = r => r1((113 / r.slope) * (r.score - r.rating));
@@ -228,12 +228,14 @@ function playerRecord(slug) {
 
 // Belt: the first title match winner takes it. The holder keeps it unless
 // someone finishes outright ahead of everyone in a title match the holder plays.
+// Only a title match where all three family players posted a round counts: two of them, guests or a solo round never move it.
 const isTitle = m => !!m.title_match && PLAYERS.every(p => m.players.includes(p.slug));
+const allPlayed = ev => PLAYERS.every(p => ev.rows.some(r => r.player === p.slug));
 function championship() {
   let holder = null, since = null, defenses = 0;
   const reigns = [];
   for (const m of state.matches.filter(m => m.status === "final" && isTitle(m)).sort(byDate)) {
-    const ev = evalMatch(m); if (!ev) continue;
+    const ev = evalMatch(m); if (!ev || !allPlayed(ev)) continue;
     if (!holder) {
       if (ev.outright) { holder = ev.outright; since = m.scheduled_for; defenses = 0; reigns.push({ player: holder, from: since, to: null, defenses: 0, won_at: m.course_name }); }
       continue;
@@ -557,7 +559,7 @@ function viewH2H() {
     ${holder ? `<div class="cn">${dot(ch.holder)} ${esc(holder.name)}</div>
       <div class="cs">Holding since ${fmtDate(ch.since)} · ${daysBetween(ch.since, today())} days · ${ch.defenses} defense${ch.defenses === 1 ? "" : "s"}</div>`
       : `<div class="cn">Vacant</div><div class="cs">The first title match crowns the champ.</div>`}
-    <details><summary>How the belt works</summary><p>Every match marked as a title match counts. The first outright winner takes the belt. After that, the champ keeps it unless someone finishes outright ahead of everyone (net, unless the match is set to gross) in a title match the champ plays. Ties go to the champ.</p></details>
+    <details><summary>How the belt works</summary><p>Every title match counts, but only when all three of you play it. Two of you, a solo round or guests never move the belt. The first outright winner takes the belt. After that, the champ keeps it unless someone finishes outright ahead of everyone (net, unless the match is set to gross) in a title match the champ plays. Ties go to the champ.</p></details>
     ${ch.reigns.length ? `<div class="reigns">${[...ch.reigns].reverse().map(r => `<div>${dot(r.player)}<b>${esc(pname(r.player))}</b> ${fmtShort(r.from)} – ${r.to ? fmtShort(r.to) : "now"} · ${r.defenses} def.</div>`).join("")}</div>` : ""}
   </section>`;
 
@@ -723,21 +725,40 @@ function photoForm(matchId) {
 }
 // Short course name for labels: the course inside a club, or the club without "Golf Course" etc.
 const courseTag = n => { const s = splitName(n || ""); return s.layout || s.base.replace(/\s+(golf\s+(course|club|links)|country club|golf)$/i, "").trim() || s.base; };
+// One dropdown picks what to show and how: all photos by month, grouped by round or by course,
+// or just one player's (photos from rounds they played) or one course's. It replaced the sideways course chips.
 function viewGallery() {
   const all = state.photos || [];
-  // Course chips: every course with photos, most photos first; tap one to see just those.
   const counts = {}; all.forEach(p => { const c = photoCourse(p); if (c) counts[c] = (counts[c] || 0) + 1; });
   const tags = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
-  if (viewGallery.course && !counts[viewGallery.course]) viewGallery.course = null;
-  const ph = viewGallery.course ? all.filter(p => photoCourse(p) === viewGallery.course) : all;
-  const months = {};
-  for (const p of ph) (months[p.taken_on.slice(0, 7)] ||= []).push(p);
+  const pMatch = p => p.match_id ? state.matches.find(m => m.id === p.match_id) : null;
+  const byPl = s => all.filter(p => pMatch(p)?.players?.includes(s));
+  const pls = PLAYERS.filter(x => byPl(x.slug).length);
+  let f = viewGallery.f || "v:month";
+  if ((f.startsWith("c:") && !counts[f.slice(2)]) || (f.startsWith("p:") && !pls.some(x => x.slug === f.slice(2)))) f = viewGallery.f = "v:month";
+  const ph = f.startsWith("c:") ? all.filter(p => photoCourse(p) === f.slice(2)) : f.startsWith("p:") ? byPl(f.slice(2)) : all;
   const mName = k => parseDate(k + "-01").toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  // Groups: [key, heading, photos], newest first.
+  const groups = {};
+  const add = (k, head, p) => (groups[k] ||= [k, head, []])[2].push(p);
+  for (const p of ph) {
+    const c = photoCourse(p), m = pMatch(p);
+    if (f === "v:round") add(`${p.taken_on}|${m?.id || c}`, `${fmtDate(p.taken_on)}${c ? " · " + courseTag(c) : ""}${m?.players?.length ? " · " + m.players.map(pname).join(", ") : ""}`, p);
+    else if (f === "v:course") add(c || "~", c ? courseTag(c) : "No course", p);
+    else add(p.taken_on.slice(0, 7), mName(p.taken_on.slice(0, 7)), p);
+  }
+  const list = Object.values(groups).sort((x, y) => f === "v:course" ? y[2].length - x[2].length || x[1].localeCompare(y[1]) : y[0].localeCompare(x[0]));
+  const opt = (v, l) => `<option value="${esc(v)}" ${v === f ? "selected" : ""}>${esc(l)}</option>`;
+  const showTag = f !== "v:course" && !f.startsWith("c:");
   return `<section class="card gallery">
     <div class="ghead"><h3>Gallery</h3><button class="primary ed" data-act="add-photo">+ Add photos</button></div>
-    ${tags.length ? `<div class="gcourses"><button class="${viewGallery.course ? "" : "on"}" data-act="gcourse" data-v="">All <span>${all.length}</span></button>${tags.map(t => `<button class="${viewGallery.course === t ? "on" : ""}" data-act="gcourse" data-v="${esc(t)}">⛳ ${esc(courseTag(t))} <span>${counts[t]}</span></button>`).join("")}</div>` : ""}
-    ${ph.length ? Object.entries(months).map(([k, list]) => `<div class="gmonth">${mName(k)}</div>
-      <div class="ggrid">${list.map(p => { const c = photoCourse(p); return `<button class="gph" data-act="photo" data-id="${p.id}" aria-label="${esc(c ? courseTag(c) : "Photo")}"><img src="${esc(photoUrl(p.thumb || p.path))}" loading="lazy" alt="">${c ? `<span class="gtag">${esc(courseTag(c))}</span>` : ""}</button>`; }).join("")}</div>`).join("")
+    ${all.length ? `<label class="gfilter">Show<select data-act="gfilter">
+      <optgroup label="All photos">${opt("v:month", `By month (${all.length})`)}${opt("v:round", "By round")}${opt("v:course", "By course")}</optgroup>
+      ${pls.length ? `<optgroup label="Player">${pls.map(x => opt("p:" + x.slug, `${x.name} (${byPl(x.slug).length})`)).join("")}</optgroup>` : ""}
+      ${tags.length ? `<optgroup label="Course">${tags.map(t => opt("c:" + t, `${courseTag(t)} (${counts[t]})`)).join("")}</optgroup>` : ""}
+    </select></label>` : ""}
+    ${ph.length ? list.map(([, head, ps]) => `<div class="gmonth">${esc(head)}${f === "v:course" ? ` <span class="muted">${ps.length}</span>` : ""}</div>
+      <div class="ggrid">${ps.map(p => { const c = photoCourse(p); return `<button class="gph" data-act="photo" data-id="${p.id}" aria-label="${esc(c ? courseTag(c) : "Photo")}"><img src="${esc(photoUrl(p.thumb || p.path))}" loading="lazy" alt="">${c && showTag ? `<span class="gtag">${esc(courseTag(c))}</span>` : ""}</button>`; }).join("")}</div>`).join("")
       : `<div class="empty">No photos yet.</div>`}
     <p class="hint ed">Anyone with the family phrase can add photos. Tap a photo, then Add the course, to tag where it was.</p>
   </section>`;
@@ -1713,7 +1734,7 @@ function confirmCard(m, step1, d, go) {
       <table class="t cplayers"><thead><tr><th></th><th class="n">Index</th><th class="n">Course hcp</th>${G.length > 1 && !isGross ? `<th class="n">Strokes</th>` : ""}</tr></thead><tbody>
         ${rows.map(x => `<tr><td>${dot(x.s)}${esc(pname(x.s))}</td><td class="n">${fmtIdx(x.h.index)}</td><td class="n">${isGross ? `<span class="muted">–</span>` : `<input type="number" class="ch-in" data-ch="${x.s}" inputmode="numeric" min="-10" max="54" value="${x.ch ?? ""}" aria-label="${esc(pname(x.s))} course handicap">`}</td>${G.length > 1 && !isGross ? `<td class="n"><b>${x.got || "–"}</b></td>` : ""}</tr>`).join("")}
       </tbody></table>
-      <p class="hint">${d.solo ? "Solo round: your gross score goes on your tab and moves your handicap." : isGross ? "Gross stroke play: playing straight up, no handicap strokes." : `${G.length > 1 ? (rows.some(x => x.got) ? "Strokes come off the lowest handicap in the group, on the hardest holes (● below). " : "Everyone plays level. ") : ""}${n === 9 ? "9 holes: half the course handicap. " : ""}Need to adjust a handicap for today? Edit any Course hcp box above before confirming.`}</p>
+      <p class="hint">${d.solo && d.players.length === 1 ? "Solo round: your gross score goes on your tab and moves your handicap." : d.solo ? `Individual round: only ${esc(pname(d.players[0]))}'s score goes on a tab and moves a handicap. Guests stay on the scorecard. ${isGross ? "" : "Strokes work like any game."}` : isGross ? "Gross stroke play: playing straight up, no handicap strokes." : `${G.length > 1 ? (rows.some(x => x.got) ? "Strokes come off the lowest handicap in the group, on the hardest holes (● below). " : "Everyone plays level. ") : ""}${n === 9 ? "9 holes: half the course handicap. " : ""}Need to adjust a handicap for today? Edit any Course hcp box above before confirming.`}</p>
       ${flatPars && !editMode ? `<div class="warnt small">No hole pars saved for this course, so every hole shows par 4. Fix them below.</div>` : ""}
       ${noSis && !editMode && !isGross ? `<div class="warnt small">No hole handicaps saved, so strokes use the standard order. Add them below if the card has them.</div>` : ""}
       ${editMode ? "" : `<div class="warnt small" data-unmapped>${unmappedNote(yd.pend = { course_name: d.course_name, course_id: d.course_id || null, pars, sis })}</div>`}
@@ -1958,7 +1979,7 @@ function viewCard(id) {
 
   // Pieces of the top box, shared by the follow-along layout and the scoring layout.
   const chips = others.length ? `<div class="chips cardsw">${state.cards.map(c => `<a class="chip ${c.id === id ? "on" : ""}" href="#card/${c.id}">${esc(splitName(c.course_name).base)}</a>`).join("")}</div>` : "";
-  const gmBadge = `<span class="lt-game">${cardSolo(card) ? "solo round" : esc(SCORING_LABEL[gm] || gm)}</span>`;
+  const gmBadge = `<span class="lt-game">${cardSolo(card) ? (card.players.length > 1 ? `solo · ${esc(SCORING_LABEL[gm] || gm)}` : "solo round") : esc(SCORING_LABEL[gm] || gm)}</span>`;
   const meta = `<div class="lt-meta"><span class="pulse"></span><span class="lt-course">${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span>${gmBadge}<span class="lt-thru">${st.thruAll ? `thru ${st.thruAll}` : fmtShort(card.played_on)}</span></div>`;
   const latest = st.moments[0] && st.thruAll && !st.head.startsWith(st.moments[0].text) ? `<div class="latest">Latest: ${esc(st.moments[0].text)}</div>` : "";
   const lboard = `<div class="lboard">${board.map(x => `<div class="lrow">
@@ -2205,7 +2226,7 @@ function rscGroups(slug) {
   const order = s => { const i = PLAYERS.findIndex(p => p.slug === s); return i < 0 ? 99 : i; };
   return Object.values(groups)
     .filter(g => !slug || g.rounds.some(r => r.player === slug))
-    .map(g => ({ ...g, solo: g.rounds.length === 1 && isSoloRound(g.rounds[0]), rounds: g.rounds.sort((a, b) => (b.player === slug) - (a.player === slug) || order(a.player) - order(b.player)) }))
+    .map(g => ({ ...g, solo: g.rounds.filter(r => !isGuest(r.player)).length === 1 && isSoloRound(g.rounds.find(r => !isGuest(r.player))), rounds: g.rounds.sort((a, b) => (b.player === slug) - (a.player === slug) || order(a.player) - order(b.player)) }))
     .sort((a, b) => b.played_on.localeCompare(a.played_on) || String(b.rounds[0].created_at || "").localeCompare(String(a.rounds[0].created_at || "")));
 }
 function roundScorecardsSection(slug) {
@@ -2435,44 +2456,46 @@ function startMatch(mt) {
   });
 }
 
-// solo = a player's slug: a round for just that player, started from their tab. Same flow, but no match,
-// no bets, no guests and stroke play; it counts toward their handicap and nothing else.
+// solo = a player's slug when started from their tab. The Round pick is Match (the family playing each other: head to
+// head, Master Champ, money) or Individual (one family player's round: only their score goes on a tab and moves their
+// handicap). Both take guests, bets and any game. A Match links itself to a scheduled match that day (or ±1 day)
+// with the same family players, which is what the old Match dropdown did.
 function cardForm(fromMatch, solo) {
   if (!editing()) return phraseForm(() => cardForm(fromMatch, solo));
   if (solo) fromMatch = null;
-  const todays = solo ? [] : state.matches.filter(m => m.status === "scheduled" && Math.abs(daysBetween(today(), m.scheduled_for)) <= 1);
-  const m0 = fromMatch || (todays.length === 1 ? todays[0] : null);
+  const near = state.matches.filter(m => m.status === "scheduled" && Math.abs(daysBetween(today(), m.scheduled_for)) <= 1);
+  const m0 = fromMatch || (!solo && near.length === 1 ? near[0] : null);
   const v = m0 ? { ...m0, ...(state.courses.find(c => c.id === m0.course_id) || {}), course_name: m0.course_name } : {};
-  openModal(`<div class="step1"><h2>${solo ? `${dot(solo)}${esc(pname(solo))}'s solo round` : "Start a scorecard"}</h2>
-    ${solo ? `<p class="hint">Just ${esc(pname(solo))}. It goes on ${esc(pname(solo))}'s tab and counts toward the handicap, but not head to head, Master Champ or money.</p>` : ""}
+  const kind0 = solo ? "solo" : "match";
+  openModal(`<div class="step1"><h2>Start a scorecard</h2>
     <form id="cf">
-      ${todays.length || fromMatch ? `<label>Match<select name="match"><option value="">Not a match</option>${[...new Set([...(fromMatch ? [fromMatch] : []), ...todays])].map(m => `<option value="${m.id}" ${m0 && m.id === m0.id ? "selected" : ""}>${fmtShort(m.scheduled_for)} · ${esc(m.course_name || "match")} · ${m.players.map(pname).join(", ")}</option>`).join("")}</select></label>` : ""}
-      ${solo ? `<input type="checkbox" name="pl" value="${solo}" checked hidden>` : `<fieldset><legend>Who's playing</legend>${PLAYERS.map(p => `<label class="chk"><input type="checkbox" name="pl" value="${p.slug}" ${(m0 ? m0.players : PLAYERS.map(x => x.slug)).includes(p.slug) ? "checked" : ""}> ${dot(p.slug)}${esc(p.name)}</label>`).join("")}</fieldset>
-      ${guestPicker()}`}
+      <label>Round<select name="kind"><option value="match" ${kind0 === "match" ? "selected" : ""}>Match</option><option value="solo" ${kind0 === "solo" ? "selected" : ""}>Individual</option></select></label>
+      <p class="hint kmatch" ${kind0 === "match" ? "" : "hidden"}>The family plays each other: counts for head to head, Master Champ and money, and each score moves that player's handicap.${m0 ? ` Goes with the ${fmtShort(m0.scheduled_for)} match.` : ""}</p>
+      <p class="hint ksolo" ${kind0 === "solo" ? "" : "hidden"}>One family player's round: only their score goes on their tab and moves their handicap. Not head to head, Master Champ or money totals. Guests can play along and bet.</p>
+      <fieldset class="kmatch" ${kind0 === "match" ? "" : "hidden"}><legend>Who's playing</legend>${PLAYERS.map(p => `<label class="chk"><input type="checkbox" name="pl" value="${p.slug}" ${(m0 ? m0.players : PLAYERS.map(x => x.slug)).includes(p.slug) ? "checked" : ""}> ${dot(p.slug)}${esc(p.name)}</label>`).join("")}</fieldset>
+      <label class="ksolo" ${kind0 === "solo" ? "" : "hidden"}>Whose round<select name="who">${PLAYERS.map(p => `<option value="${p.slug}" ${p.slug === solo ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
+      ${guestPicker()}
       <div class="row2"><label>Date<input type="date" name="played_on" value="${today()}" required></label>
       <label>Holes<select name="holes"><option>18</option><option>9</option></select></label></div>
       ${courseFields(v)}
-      ${solo ? `<input type="hidden" name="game" value="stroke">` : `<div class="laylbl">Bets</div>${betFields(m0?.bets === undefined ? BET_DEFAULT : m0.bets, 18)}
-      ${gameSelectHtml(m0?.scoring === "gross" ? "stroke" : (m0?.scoring || "match"))}`}
+      <div class="laylbl">Bets</div>${betFields(m0?.bets === undefined ? BET_DEFAULT : m0.bets, 18)}
+      ${gameSelectHtml(solo ? "stroke" : m0?.scoring === "gross" ? "stroke" : (m0?.scoring || "match"))}
       <div class="acts"><button class="primary" type="submit">Check scorecard ›</button></div>
     </form></div>`, m => {
     const f = $("#cf", m); wireCoursePicker(f);
     const syncBets = wireBets(f, 18) || (() => {});
     const gpick = wireGuestPicker(f) || { pending: () => false, commit: async () => ({ slugs: [], meta: {} }) };
     f.holes.onchange = () => syncBets(Number(f.holes.value));
-    if (f.match) f.match.onchange = () => {
-      const mt = state.matches.find(x => x.id === f.match.value); if (!mt) return;
-      f.querySelectorAll("[name=pl]").forEach(x => x.checked = mt.players.includes(x.value));
-      if (f.game && mt.scoring) f.game.value = mt.scoring === "gross" ? "stroke" : mt.scoring;
-      if (mt.course_name) { const c = state.courses.find(c => c.id === mt.course_id) || mt;
-        const nm = splitName(mt.course_name); f.course_name.value = nm.base; f.layout.value = nm.layout; renderLayouts(f);
-        f.tee_name.value = mt.tee_name || ""; f.rating.value = mt.rating ?? ""; f.slope.value = mt.slope ?? ""; f.par.value = mt.par ?? "";
-        f.pars.value = c.pars ? JSON.stringify(c.pars) : ""; f.sis.value = c.sis ? JSON.stringify(c.sis) : ""; }
+    f.kind.onchange = () => {
+      const sk = f.kind.value === "solo";
+      f.querySelectorAll(".kmatch").forEach(x => x.hidden = sk);
+      f.querySelectorAll(".ksolo").forEach(x => x.hidden = !sk);
     };
     f.onsubmit = async e => {
       e.preventDefault();
       const c = readCourse(f); const n = Number(f.holes.value);
-      const players = [...f.querySelectorAll("[name=pl]:checked")].map(x => x.value);
+      const isSolo = f.kind.value === "solo";
+      const players = isSolo ? [f.who.value] : [...f.querySelectorAll("[name=pl]:checked")].map(x => x.value);
       if (!players.length) return toast("Pick who's playing.");
       if (!c.course_name) return toast("Pick or type the course.");
       if (gpick.pending()) return toast("Tap Add to round for the guest first, or Cancel.");
@@ -2481,7 +2504,9 @@ function cardForm(fromMatch, solo) {
       let sis = null;
       if (c.sis?.length === 18) { const s9 = c.sis.slice(0, n); sis = n === 9 ? s9.map(x => s9.filter(y => y < x).length + 1) : c.sis; }
       else if (c.sis?.length === n) sis = c.sis;
-      const mt = state.matches.find(x => x.id === f.match?.value);
+      // A Match goes with the scheduled match it came from, or one near today with the same family players.
+      const same = mt => mt.players.length === players.length && mt.players.every(p => players.includes(p));
+      const mt = isSolo ? null : fromMatch || near.find(same) || null;
       const game = f.game?.value || "match";
       // Guests in the money join the game and the bets; guests who aren't just keep score.
       const moneyGuests = () => f.querySelectorAll(".gpicker [data-gm]:checked").length;
@@ -2491,15 +2516,15 @@ function cardForm(fromMatch, solo) {
       let gx;
       try { gx = await gpick.commit(); } catch (err) { return toast("Couldn't save the guest: " + errMsg(err)); }
       confirmCard(m, $(".step1", m), { course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: c.par,
-        pars, sis, parsKnown: known, players: [...players, ...gx.slugs], guests: gx.meta, game, solo: !!solo, saveName: state.courses.some(x => x.name === c.course_name) || (c.rating && c.slope && c.par) ? c.course_name : null,
+        pars, sis, parsKnown: known, players: [...players, ...gx.slugs], guests: gx.meta, game, solo: isSolo, saveName: state.courses.some(x => x.name === c.course_name) || (c.rating && c.slope && c.par) ? c.course_name : null,
         betsLine: bets ? stakesText(bets, n) : inPlay > 1 ? "No money" : "" },
         async (pars, sis, toCourse, hcpOv) => {
           const course_id = c.rating && c.slope && c.par ? await ensureCourse({ ...c, name: c.course_name, ...(toCourse ? { pars, sis } : {}) }) : null;
           if (toCourse) await saveCourseCard(c.course_name, pars, sis);
           const sc = dbScoring(game);
-          const meta = { game, ...(Object.keys(hcpOv || {}).length ? { hcp: hcpOv } : {}), ...(gx.slugs.length ? { guests: gx.meta } : {}), ...(solo ? { solo: true } : {}) };
+          const meta = { game, ...(Object.keys(hcpOv || {}).length ? { hcp: hcpOv } : {}), ...(gx.slugs.length ? { guests: gx.meta } : {}), ...(isSolo ? { solo: true } : {}) };
           const row = { played_on: f.played_on.value, course_id, course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope,
-            par: c.par, pars, sis, players: [...players, ...gx.slugs], scores: { __meta: meta }, match_id: f.match?.value || null, scoring: sc, status: "live", bets };
+            par: c.par, pars, sis, players: [...players, ...gx.slugs], scores: { __meta: meta }, match_id: mt?.id || null, scoring: sc, status: "live", bets };
           const id = await save("cards", row);
           if (mt) await save("matches", { scoring: sc, bets }, mt.id);
           localStorage.setItem("golf_hole_" + id, "0");
@@ -2609,7 +2634,6 @@ document.addEventListener("click", e => {
   if (act === "bets") betsForm(id);
   if (act === "add-photo") photoForm();
   if (act === "photo") photoView(id, viewGallery.course);
-  if (act === "gcourse") { viewGallery.course = b.dataset.v || null; render(); }
   if (act === "press") pressForm(id);
   if (act === "unpress") unpress(id, Number(b.dataset.v));
   if (act === "money") moneyForm(state.matches.find(m => m.id === id));
@@ -2623,6 +2647,7 @@ document.addEventListener("click", e => {
 // Keep the Strokes section open or closed while the live card redraws.
 document.addEventListener("toggle", e => { if (e.target.classList?.contains("strokesd")) viewCard._strokes = e.target.open; }, true);
 document.addEventListener("change", e => {
+  if (e.target.dataset.act === "gfilter") { viewGallery.f = e.target.value; render(); return; }
   if (e.target.id === "calcCourse") {
     const c = state.courses.find(x => x.id === e.target.value);
     $("#calcOut").innerHTML = strokesLine(c, PLAYERS.map(p => p.slug));

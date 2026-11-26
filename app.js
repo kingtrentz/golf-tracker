@@ -596,6 +596,7 @@ function viewH2H() {
       ${hasCourse && m.scoring !== "gross" ? strokesLine(m, m.players) : ""}
       ${m.notes ? `<div class="note">${esc(m.notes)}</div>` : ""}
       ${m.bets && !live ? `<div class="note">Bets ${stakesText(m.bets, 18)}</div>` : ""}
+      ${live || d < 0 ? "" : `<div data-mmap="${m.id}">${matchMapNote(m)}</div>`}
       ${live ? `<div class="acts"><a class="btnlink" href="#card/${live.id}">Open scorecard ›</a></div>` : `<div class="ed acts"><button class="primary" data-act="start-match" data-id="${m.id}">Start match</button><button data-act="results" data-id="${m.id}">Post results</button><button class="link" data-act="edit-match" data-id="${m.id}">Edit</button></div>`}
     </div>`;
   }).join("");
@@ -1785,6 +1786,7 @@ function liveStrip() {
         <div class="sc2">${esc(next.course_name || "Course TBD")}${next.tee_name ? `<span class="tee">${esc(next.tee_name)}</span>` : ""}${isTitle(next) ? `<span class="tag gold">🏆 title match</span>` : ""}</div>
         <div class="sb">${next.players.map(s => `<span>${dot(s)}${esc(pname(s))}</span>`).join(`<span class="muted">vs</span>`)}</div>
         ${hasCourse && next.scoring !== "gross" ? strokesLine(next, next.players) : ""}
+        <div data-mmap="${next.id}">${matchMapNote(next)}</div>
         <div class="acts"><button class="primary${isToday ? " big" : ""}" data-act="start-match" data-id="${next.id}">Start match</button>${isToday ? "" : `<span class="ss">Tap when you tee off.</span>`}</div>
       </section>`);
     }
@@ -2616,7 +2618,7 @@ document.addEventListener("click", e => {
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
   if (["hole", "sc", "par", "theme", "ctab"].includes(act)) cardAction(act, b);
   if (act === "yds") ydToggle();
-  if (act === "pinmap") { const c = cardById(id); if (c) openPinMap(c, Number(b.dataset.v)); }
+  if (act === "pinmap" || act === "pinmatch") { const c = act === "pinmap" ? cardById(id) : matchPc(state.matches.find(m => m.id === id)); if (c) openPinMap(c, Number(b.dataset.v)); }
 });
 // Keep the Strokes section open or closed while the live card redraws.
 document.addEventListener("toggle", e => { if (e.target.classList?.contains("strokesd")) viewCard._strokes = e.target.open; }, true);
@@ -2968,6 +2970,7 @@ function ydPaint() {
   document.querySelectorAll("[data-ryds]").forEach(el => { const [id, h] = el.dataset.ryds.split(":"); const card = cardById(id); if (card) el.textContent = ydRoughText(card, +h); });
   document.querySelectorAll("[data-hnote]").forEach(el => { const [id, h] = el.dataset.hnote.split(":"); const card = cardById(id); if (card) el.innerHTML = ydHoleNote(card, +h); });
   document.querySelectorAll("[data-unmapped]").forEach(el => { el.innerHTML = unmappedNote(yd.pend); });
+  document.querySelectorAll("[data-mmap]").forEach(el => { const m = state.matches.find(x => x.id === el.dataset.mmap), h = m ? matchMapNote(m) : ""; if (el._h !== h) el.innerHTML = el._h = h; });
   satPaint();
 }
 
@@ -3190,6 +3193,21 @@ function unmappedNote(pc) {
   if (!miss.length) return "";
   if (miss.length === n) return `No hole maps for this course yet. On the live card, tap "isn't mapped" on a hole to set its tee and green on the satellite.`;
   return `${miss.length} of ${n} holes aren't mapped yet (${holeList(miss)}). On the live card you can set each one's tee and green on the satellite, before or during the round.`;
+}
+// Scheduled round on a course with holes nobody has mapped: say so ahead of time, so they can be tapped in from the couch.
+function matchPc(m) {
+  if (!m?.course_name) return null;
+  const c = state.courses.find(x => x.id === m.course_id && x.pars?.length) || state.courses.find(x => x.name === m.course_name && x.pars?.length);
+  return c ? { course_name: m.course_name, course_id: m.course_id || c.id, pars: c.pars, sis: c.sis || null } : null; // no pars saved: can't tell which holes
+}
+function matchMapNote(m) {
+  const pc = matchPc(m); if (!pc) return "";
+  ydLoadFile(); ydGreens(pc);
+  if (!ydDone(pc)) return "";
+  const n = pc.pars.length, miss = [...Array(n).keys()].filter(i => !ydHole(pc, i));
+  if (!miss.length) return "";
+  const head = miss.length === n ? "No holes mapped at this course yet" : `${miss.length} of ${n} holes not mapped yet (${holeList(miss.map(i => i + 1))})`;
+  return `<button type="button" class="mapme" data-act="pinmatch" data-id="${m.id}" data-v="${miss[0]}"><b>${head}</b><span>Tap to map hole ${miss[0] + 1} on the satellite</span></button>`;
 }
 async function openPinMap(card, hole) {
   if (!editing()) return phraseForm(() => openPinMap(card, hole));

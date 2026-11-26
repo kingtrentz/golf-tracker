@@ -2052,7 +2052,7 @@ function viewCard(id) {
     if (tab === "bets" && !bets) tab = "game";
     const tabs = [["game", "Game"], ["card", "Scorecard"], ...(bets ? [["bets", "Bets"]] : [])];
     const bar = `<div class="ctabs">${tabs.map(([k, l]) => `<button type="button" class="${k === tab ? "on" : ""}" data-act="ctab" data-v="${k}">${l}</button>`).join("")}</div>`;
-    return bar + (tab === "card" ? scard + scLinks : tab === "bets" ? bets : entry + standings + endBtn);
+    return bar + (tab === "card" ? scard : tab === "bets" ? bets : entry + standings + endBtn + scLinks);
   }
   return `${top + entry + endBtn}${highlights}${scard}${bets}${scLinks}`;
 }

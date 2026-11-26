@@ -3346,15 +3346,6 @@ async function openPinMap(card, hole) {
       const miss = missing();
       left.textContent = miss.length ? `${miss.length} of ${n} not mapped yet: ${holeList(miss.map(i => i + 1))}` : `All ${n} holes mapped.`;
       $("#pinprev", m).disabled = h === 0; $("#pinnext", m).disabled = h === n - 1;
-      ctx.clearLayers();
-      for (let i = 0; i < n; i++) {
-        const o = i === h ? null : ydHole(card, i); if (!o) continue;
-        const gc = ydGreenCenter(o.g);
-        L.polygon(o.g, { color: "#bfa478", weight: 1.5, fillOpacity: 0.12, interactive: false }).addTo(ctx);
-        L.polyline([o.t, gc], { color: "#bfa478", weight: 2, opacity: 0.8, interactive: false }).addTo(ctx);
-        L.circleMarker(o.t, { radius: 3, color: "#bfa478", fillOpacity: 1, interactive: false }).addTo(ctx);
-        L.marker(gc, { icon: num(i + 1, "on"), interactive: false, keyboard: false }).addTo(ctx);
-      }
       // Start view: this hole if it has both spots, otherwise the hole just done or the holes either side, otherwise the whole course.
       const fr = from != null ? ydHole(card, from) : null;
       const near = (fr ? [fr] : [no - 1, no + 1].map(k => ydHole(card, k - 1)).filter(Boolean)).flatMap(o => [o.t, ydGreenCenter(o.g)]);
@@ -3368,6 +3359,16 @@ async function openPinMap(card, hole) {
         if (all.length > 1) map.fitBounds(L.latLngBounds(all).pad(0.15), { maxZoom: 17 });
         else if (all.length) map.setView(all[0], 16);
         else { map.setView([39.5, -98.35], 4); toast("Couldn't find this course on the map. Zoom in to it."); }
+      }
+      // Leaflet needs a view before anything is drawn, so this comes after it.
+      ctx.clearLayers();
+      for (let i = 0; i < n; i++) {
+        const o = i === h ? null : ydHole(card, i); if (!o) continue;
+        const gc = ydGreenCenter(o.g);
+        L.polygon(o.g, { color: "#bfa478", weight: 1.5, fillOpacity: 0.12, interactive: false }).addTo(ctx);
+        L.polyline([o.t, gc], { color: "#bfa478", weight: 2, opacity: 0.8, interactive: false }).addTo(ctx);
+        L.circleMarker(o.t, { radius: 3, color: "#bfa478", fillOpacity: 1, interactive: false }).addTo(ctx);
+        L.marker(gc, { icon: num(i + 1, "on"), interactive: false, keyboard: false }).addTo(ctx);
       }
       sync();
     };

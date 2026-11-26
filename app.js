@@ -2473,6 +2473,8 @@ function cardForm(fromMatch, solo) {
       <p class="hint kmatch" ${kind0 === "match" ? "" : "hidden"}>The family plays each other: counts for head to head, Master Champ and money, and each score moves that player's handicap.${m0 ? ` Goes with the ${fmtShort(m0.scheduled_for)} match.` : ""}</p>
       <p class="hint ksolo" ${kind0 === "solo" ? "" : "hidden"}>One family player's round: only their score goes on their tab and moves their handicap. Not head to head, Master Champ or money totals. Guests can play along and bet.</p>
       <fieldset class="kmatch" ${kind0 === "match" ? "" : "hidden"}><legend>Who's playing</legend>${PLAYERS.map(p => `<label class="chk"><input type="checkbox" name="pl" value="${p.slug}" ${(m0 ? m0.players : PLAYERS.map(x => x.slug)).includes(p.slug) ? "checked" : ""}> ${dot(p.slug)}${esc(p.name)}</label>`).join("")}</fieldset>
+      <label class="chk tm kmatch" ${kind0 === "match" ? "" : "hidden"}><input type="checkbox" name="title_match" ${m0 && isTitle(m0) ? "checked" : ""}> 🏆 Title match</label>
+      <p class="hint kmatch tmhint" ${kind0 === "match" ? "" : "hidden"}>Title matches need all three of you. The belt only moves if all three post a score.</p>
       <label class="ksolo" ${kind0 === "solo" ? "" : "hidden"}>Whose round<select name="who">${PLAYERS.map(p => `<option value="${p.slug}" ${p.slug === solo ? "selected" : ""}>${esc(p.name)}</option>`).join("")}</select></label>
       ${guestPicker()}
       <div class="row2"><label>Date<input type="date" name="played_on" value="${today()}" required></label>
@@ -2491,6 +2493,10 @@ function cardForm(fromMatch, solo) {
       f.querySelectorAll(".kmatch").forEach(x => x.hidden = sk);
       f.querySelectorAll(".ksolo").forEach(x => x.hidden = !sk);
     };
+    // Title match: only with all three family players ticked.
+    const syncTitle = () => { const all = f.querySelectorAll("[name=pl]:checked").length === PLAYERS.length;
+      f.title_match.disabled = !all; if (!all) f.title_match.checked = false; };
+    f.querySelectorAll("[name=pl]").forEach(x => x.addEventListener("change", syncTitle)); syncTitle();
     f.onsubmit = async e => {
       e.preventDefault();
       const c = readCourse(f); const n = Number(f.holes.value);
@@ -2522,11 +2528,13 @@ function cardForm(fromMatch, solo) {
           const course_id = c.rating && c.slope && c.par ? await ensureCourse({ ...c, name: c.course_name, ...(toCourse ? { pars, sis } : {}) }) : null;
           if (toCourse) await saveCourseCard(c.course_name, pars, sis);
           const sc = dbScoring(game);
-          const meta = { game, ...(Object.keys(hcpOv || {}).length ? { hcp: hcpOv } : {}), ...(gx.slugs.length ? { guests: gx.meta } : {}), ...(isSolo ? { solo: true } : {}) };
+          const title = !isSolo && f.title_match.checked && PLAYERS.every(p => players.includes(p.slug));
+          const meta = { game, ...(Object.keys(hcpOv || {}).length ? { hcp: hcpOv } : {}), ...(gx.slugs.length ? { guests: gx.meta } : {}), ...(isSolo ? { solo: true } : {}), ...(title ? { title: true } : {}) };
           const row = { played_on: f.played_on.value, course_id, course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope,
             par: c.par, pars, sis, players: [...players, ...gx.slugs], scores: { __meta: meta }, match_id: mt?.id || null, scoring: sc, status: "live", bets };
           const id = await save("cards", row);
-          if (mt) await save("matches", { scoring: sc, bets }, mt.id);
+          // The box was set from this match only when the form opened on it; otherwise ticking it can make it a title match but never unmakes one.
+          if (mt) await save("matches", { scoring: sc, bets, ...(title || mt === m0 ? { title_match: title } : {}) }, mt.id);
           localStorage.setItem("golf_hole_" + id, "0");
           closeModal(); await loadData(); location.hash = "card/" + id;
         });
@@ -2559,13 +2567,14 @@ function finishForm(id) {
       try {
         await flushSaves();
         const course_id = await ensureCourse({ ...c, name: c.course_name, pars: n === 18 ? card.pars : null, sis: n === 18 && card.sis?.length === 18 ? card.sis : null });
-        // Money needs a match to live on: make one for a card that wasn't started from a scheduled round.
+        // Money (or a title match ticked at the start) needs a match to live on: make one for a card that wasn't started from a scheduled round.
         // Matches only list the family (guests stay out of head to head); guest money rides in bets.result.
         const fam = card.players.filter(s => !isGuest(s)), famDone = done.filter(x => !isGuest(x.s));
         let matchId = card.match_id || null;
-        if (!matchId && bet && famDone.length >= 2) {
+        const titleCard = !!card.scores?.__meta?.title;
+        if (!matchId && (bet || titleCard) && famDone.length >= 2) {
           matchId = await save("matches", { scheduled_for: card.played_on, course_id, course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: c.par,
-            players: fam, status: "scheduled", scoring: card.scoring || "match", title_match: false });
+            players: fam, status: "scheduled", scoring: card.scoring || "match", title_match: titleCard && PLAYERS.every(p => fam.includes(p.slug)) });
           await save("cards", { match_id: matchId }, id); card.match_id = matchId;
         }
         for (const x of done) {

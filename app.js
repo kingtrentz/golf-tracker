@@ -1885,7 +1885,26 @@ function viewCard(id) {
   const rateWarn = !card.rating || !card.slope ? `<div class="warnt small">Add the course rating and slope (End round) so handicap strokes count.</div>` : "";
   const noSis = card.sis?.length === n ? "" : `<div class="muted small">No hole handicaps saved for this course, so strokes use the standard order. <button class="link ed" data-act="cardsc" data-id="${id}">Edit scorecard</button></div>`;
   // Scoring: the hole (header, map, everyone's buttons) comes first; the match standings sit under it in one box.
-  const standings = `<section class="card live-top lbcard">${chips}${meta}<div class="headline">${esc(st.head)}</div>${mlines}${rateWarn}${latest}${lboard}<details class="strokesd" ${viewCard._strokes ? "open" : ""}><summary class="muted small">Strokes</summary>${hcpline}${noSis}</details></section>`;
+  // Scoring view: one small table. Rows are players (score to par, points or skins); with 3+ players
+  // each opponent gets a column showing the row player's match against them (2 up, 1 dn, AS, W 3&2).
+  const multi = st.pairs.length > 1;
+  const short = s => esc(pname(s).split(" ")[0].slice(0, 6));
+  const vs = (s, o) => {
+    if (s === o) return `<td class="mx-self"></td>`;
+    const pr = st.pairs.find(q => (q.a === s && q.b === o) || (q.a === o && q.b === s));
+    if (!pr || !pr.thru) return `<td class="muted">–</td>`;
+    const tip = ` title="${esc(pr.text)}"`;
+    if (pr.done) { const m = (pr.text.split(" wins ")[1] || "").replace(" up", "up");
+      return pr.winner === s ? `<td class="mx-up"${tip}>W${m ? " " + esc(m) : ""}</td>` : pr.winner ? `<td class="mx-dn"${tip}>L${m ? " " + esc(m) : ""}</td>` : `<td${tip}>H</td>`; }
+    const me = (s === pr.a ? 1 : -1) * pr.up;
+    return me > 0 ? `<td class="mx-up"${tip}>${me} up</td>` : me < 0 ? `<td class="mx-dn"${tip}>${-me} dn</td>` : `<td${tip}>AS</td>`;
+  };
+  const stable = `<table class="stbl"><thead><tr><th></th><th>Score</th><th>${sk ? "Skins" : "Pts"}</th>${multi ? card.players.map(o => `<th>${dot(o)}${short(o)}</th>`).join("") : ""}</tr></thead>
+    <tbody>${board.map(x => `<tr><td class="stn">${dot(x.s)}<span>${esc(pname(x.s))}</span>${chip(x.s)}</td>
+      <td class="sts">${x.t.thru ? `<b>${fmtToPar(x.t.toPar)}</b><small>${x.t.gross}</small>` : `<span class="muted">–</span>`}</td>
+      <td class="stp">${x.t.thru ? `<b>${sk ? x.sk : x.p.pts}</b>` : `<span class="muted">–</span>`}</td>
+      ${multi ? card.players.map(o => vs(x.s, o)).join("") : ""}</tr>`).join("")}</tbody></table>`;
+  const standings = `<section class="card live-top lbcard">${chips}${meta}<div class="headline">${esc(st.head)}</div>${rateWarn}${latest}${stable}<details class="strokesd" ${viewCard._strokes ? "open" : ""}><summary class="muted small">Strokes</summary>${hcpline}${noSis}</details></section>`;
   const top = `<section class="card live-top">
     ${chips}
     ${meta}
@@ -1924,7 +1943,6 @@ function viewCard(id) {
         </div>`;
       }).join("")}
       <div class="hfoot"><span><span id="savestate" class="savestate"></span><span id="autoadv" class="autoadv">${cardAction._advFor === id + ":" + hole ? `Hole ${hole + 2} next…` : ""}</span></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Submit round</button>`}</div>
-      <p class="hint">Tap the number for par, − and + for anything else. Once everyone has a score it moves to the next hole.</p>
     </section>` : `<p class="hint center">Updates by itself. Tap Enter scores to keep score.</p>`;
 
   const grid = half => {

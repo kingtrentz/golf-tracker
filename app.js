@@ -3433,7 +3433,7 @@ async function openPinMap(card, hole) {
 function gpsPin(card, hole, k, btn) {
   if (!editing()) return phraseForm(() => gpsPin(card, hole, k));
   if (!("geolocation" in navigator)) return toast("GPS not supported on this device");
-  const course = card.course_name, no = hole + 1, what = k === "t" ? "tee" : "green";
+  const course = card.course_name, no = hole + 1;
   const label = btn?.textContent;
   const done = () => { if (btn) { btn.disabled = false; btn.textContent = label; } };
   if (btn) { btn.disabled = true; btn.textContent = "Getting your spot…"; }
@@ -3454,7 +3454,7 @@ function gpsPin(card, hole, k, btn) {
     if (btn) btn.disabled = false;
     satBases.clear(); yd.fixKey = ""; render(); ydPaint();
     const h = ydHole(card, hole);
-    toast(h ? `Hole ${no} mapped.` : `${what[0].toUpperCase() + what.slice(1)} saved for hole ${no}. Tap "I'm on the ${k === "t" ? "green" : "tee"}" when you get there.`);
+    toast(h ? `Hole ${no} mapped.` : k === "t" ? `Tee saved for hole ${no}. Tap "I'm on the green" when you get there.` : `Green saved for hole ${no}. Tap "I'm on the tee" next time you're on it.`);
   }, e => { done(); toast(e.code === 1 ? "Location blocked. Allow it in Safari Settings." : "Could not get GPS. Try again."); },
   { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
 }

@@ -1449,9 +1449,9 @@ function potRows(card) {
 function settlePot(card) {
   const buy = +card.bets.pot || 0, P = bettors(card), total = buy * P.length;
   const cmp = (x, y) => { for (let i = 0; i < x.k.length; i++) if (x.k[i] !== y.k[i]) return y.k[i] - x.k[i]; return 0; };
-  const rows = potRows(card).sort(cmp);
-  const started = P.some(s => cardTotals(card, s).thru);
-  const winners = started ? rows.filter(r => cmp(r, rows[0]) === 0).map(r => r.s) : [];
+  // Players who haven't scored a hole yet sit at the bottom and can't lead.
+  const rows = potRows(card).map(r => ({ ...r, thru: cardTotals(card, r.s).thru })).sort((x, y) => (y.thru ? 1 : 0) - (x.thru ? 1 : 0) || cmp(x, y));
+  const winners = rows[0]?.thru ? rows.filter(r => r.thru && cmp(r, rows[0]) === 0).map(r => r.s) : [];
   const done = P.every(s => cardTotals(card, s).done);
   const net = Object.fromEntries(P.map(s => [s, 0])), pays = [];
   if (done && winners.length < P.length) {
@@ -1479,7 +1479,7 @@ function betsBox(card) {
       : r.winners.length ? `${lead} ${r.winners.length > 1 ? "would split" : "would take"} the ${money(r.total)} pot <span class="muted">so far</span>` : "Nobody owes anything yet.";
     return `<section class="card bets"><h3>Pot <span class="muted small">${money(r.buy)} each · ${money(r.total)} · ${esc(SCORING_LABEL[gm] || gm)}</span></h3>
       ${r.rows.map(x => `<div class="brow ${r.done ? "fin" : ""}"><span>${dot(x.s)}${esc(pname(x.s))}</span>
-        <b style="${r.winners.includes(x.s) ? `color:${pcolor(x.s)}` : ""}">${esc(x.show)}${r.done && r.winners.includes(x.s) && r.winners.length < r.rows.length ? ` · ${money(Math.round(share * 100) / 100)}` : ""}</b></div>`).join("")}
+        <b style="${r.winners.includes(x.s) ? `color:${pcolor(x.s)}` : ""}">${x.thru ? esc(x.show) : `<span class="muted">–</span>`}${r.done && r.winners.includes(x.s) && r.winners.length < r.rows.length ? ` · ${money(Math.round(share * 100) / 100)}` : ""}</b></div>`).join("")}
       <div class="bsum">${sum}</div>
       ${ed ? `<div class="acts"><button class="link" data-act="bets" data-id="${card.id}">Change bets</button></div>` : ""}
     </section>`;
@@ -1496,7 +1496,7 @@ function betsBox(card) {
 // Stake inputs used on Start match, Start a scorecard, and Change bets.
 // Two games: Nassau (each pair plays front, back and game, with presses) or a Pot (one buy-in each).
 const BET_NOTE = { nassau: "Each pair plays its own bets. Ties push. Press anytime from the Live tab.",
-  pot: "Everyone in the money buys in once. Best result (by Scored by) takes the pot, ties split. Most you can lose is the buy-in." };
+  pot: "Everyone in the money buys in once. Best score takes the pot, ties split. Most you can lose is the buy-in." };
 function betFields(b, holes) {
   const on = b !== null && b !== undefined ? !!b : true; b = b || BET_DEFAULT;
   const type = b.type === "pot" ? "pot" : "nassau", nb = type === "pot" ? BET_DEFAULT : b;

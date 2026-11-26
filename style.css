@@ -820,3 +820,9 @@ body[data-tab="card"] .endbtn { padding: 9px; }
 .stbl td.mx-self { background: color-mix(in srgb, var(--line) 35%, transparent); }
 .stbl td.mx-up { color: var(--good-text); font-weight: 700; }
 .stbl td.mx-dn { color: var(--text-2); }
+
+/* Live card tabs while scoring (Nov 26): Game, Scorecard, Bets */
+.ctabs { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 0 0 8px; }
+.ctabs button { flex: 1; border: 0; border-radius: 0; padding: 8px 0; font-size: 14px; }
+.ctabs button + button { border-left: 1px solid var(--line); }
+.ctabs button.on { background: var(--accent); color: var(--on-accent); font-weight: 700; }

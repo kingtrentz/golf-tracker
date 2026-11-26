@@ -1983,7 +1983,7 @@ function viewCard(id) {
       <td class="sts">${x.t.thru ? `<b>${fmtToPar(x.t.toPar)}</b><small>${x.t.gross}</small>` : `<span class="muted">–</span>`}</td>
       <td class="stp">${x.t.thru ? `<b>${sk ? x.sk : x.p.pts}</b>` : `<span class="muted">–</span>`}</td>
       ${multi ? card.players.map(o => vs(x.s, o)).join("") : ""}</tr>`).join("")}</tbody></table>`;
-  const standings = `<section class="card live-top lbcard">${chips}${meta}<div class="headline">${esc(st.head)}</div>${rateWarn}${latest}${stable}<details class="strokesd" ${viewCard._strokes ? "open" : ""}><summary class="muted small">Strokes</summary>${hcpline}${noSis}</details></section>`;
+  const standings = `<section class="card live-top lbcard">${chips}${meta}${rateWarn}${latest}${stable}<div class="headline under">${esc(st.head)}</div><details class="strokesd" ${viewCard._strokes ? "open" : ""}><summary class="muted small">Strokes</summary>${hcpline}${noSis}</details></section>`;
   const top = `<section class="card live-top">
     ${chips}
     ${meta}

@@ -718,21 +718,40 @@ function photoForm(matchId) {
 }
 // Short course name for labels: the course inside a club, or the club without "Golf Course" etc.
 const courseTag = n => { const s = splitName(n || ""); return s.layout || s.base.replace(/\s+(golf\s+(course|club|links)|country club|golf)$/i, "").trim() || s.base; };
+// One dropdown picks what to show and how: all photos by month, grouped by round or by course,
+// or just one player's (photos from rounds they played) or one course's. It replaced the sideways course chips.
 function viewGallery() {
   const all = state.photos || [];
-  // Course chips: every course with photos, most photos first; tap one to see just those.
   const counts = {}; all.forEach(p => { const c = photoCourse(p); if (c) counts[c] = (counts[c] || 0) + 1; });
   const tags = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a.localeCompare(b));
-  if (viewGallery.course && !counts[viewGallery.course]) viewGallery.course = null;
-  const ph = viewGallery.course ? all.filter(p => photoCourse(p) === viewGallery.course) : all;
-  const months = {};
-  for (const p of ph) (months[p.taken_on.slice(0, 7)] ||= []).push(p);
+  const pMatch = p => p.match_id ? state.matches.find(m => m.id === p.match_id) : null;
+  const byPl = s => all.filter(p => pMatch(p)?.players?.includes(s));
+  const pls = PLAYERS.filter(x => byPl(x.slug).length);
+  let f = viewGallery.f || "v:month";
+  if ((f.startsWith("c:") && !counts[f.slice(2)]) || (f.startsWith("p:") && !pls.some(x => x.slug === f.slice(2)))) f = viewGallery.f = "v:month";
+  const ph = f.startsWith("c:") ? all.filter(p => photoCourse(p) === f.slice(2)) : f.startsWith("p:") ? byPl(f.slice(2)) : all;
   const mName = k => parseDate(k + "-01").toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  // Groups: [key, heading, photos], newest first.
+  const groups = {};
+  const add = (k, head, p) => (groups[k] ||= [k, head, []])[2].push(p);
+  for (const p of ph) {
+    const c = photoCourse(p), m = pMatch(p);
+    if (f === "v:round") add(`${p.taken_on}|${m?.id || c}`, `${fmtDate(p.taken_on)}${c ? " · " + courseTag(c) : ""}${m?.players?.length ? " · " + m.players.map(pname).join(", ") : ""}`, p);
+    else if (f === "v:course") add(c || "~", c ? courseTag(c) : "No course", p);
+    else add(p.taken_on.slice(0, 7), mName(p.taken_on.slice(0, 7)), p);
+  }
+  const list = Object.values(groups).sort((x, y) => f === "v:course" ? y[2].length - x[2].length || x[1].localeCompare(y[1]) : y[0].localeCompare(x[0]));
+  const opt = (v, l) => `<option value="${esc(v)}" ${v === f ? "selected" : ""}>${esc(l)}</option>`;
+  const showTag = f !== "v:course" && !f.startsWith("c:");
   return `<section class="card gallery">
     <div class="ghead"><h3>Gallery</h3><button class="primary ed" data-act="add-photo">+ Add photos</button></div>
-    ${tags.length ? `<div class="gcourses"><button class="${viewGallery.course ? "" : "on"}" data-act="gcourse" data-v="">All <span>${all.length}</span></button>${tags.map(t => `<button class="${viewGallery.course === t ? "on" : ""}" data-act="gcourse" data-v="${esc(t)}">⛳ ${esc(courseTag(t))} <span>${counts[t]}</span></button>`).join("")}</div>` : ""}
-    ${ph.length ? Object.entries(months).map(([k, list]) => `<div class="gmonth">${mName(k)}</div>
-      <div class="ggrid">${list.map(p => { const c = photoCourse(p); return `<button class="gph" data-act="photo" data-id="${p.id}" aria-label="${esc(c ? courseTag(c) : "Photo")}"><img src="${esc(photoUrl(p.thumb || p.path))}" loading="lazy" alt="">${c ? `<span class="gtag">${esc(courseTag(c))}</span>` : ""}</button>`; }).join("")}</div>`).join("")
+    ${all.length ? `<label class="gfilter">Show<select data-act="gfilter">
+      <optgroup label="All photos">${opt("v:month", `By month (${all.length})`)}${opt("v:round", "By round")}${opt("v:course", "By course")}</optgroup>
+      ${pls.length ? `<optgroup label="Player">${pls.map(x => opt("p:" + x.slug, `${x.name} (${byPl(x.slug).length})`)).join("")}</optgroup>` : ""}
+      ${tags.length ? `<optgroup label="Course">${tags.map(t => opt("c:" + t, `${courseTag(t)} (${counts[t]})`)).join("")}</optgroup>` : ""}
+    </select></label>` : ""}
+    ${ph.length ? list.map(([, head, ps]) => `<div class="gmonth">${esc(head)}${f === "v:course" ? ` <span class="muted">${ps.length}</span>` : ""}</div>
+      <div class="ggrid">${ps.map(p => { const c = photoCourse(p); return `<button class="gph" data-act="photo" data-id="${p.id}" aria-label="${esc(c ? courseTag(c) : "Photo")}"><img src="${esc(photoUrl(p.thumb || p.path))}" loading="lazy" alt="">${c && showTag ? `<span class="gtag">${esc(courseTag(c))}</span>` : ""}</button>`; }).join("")}</div>`).join("")
       : `<div class="empty">No photos yet.</div>`}
     <p class="hint ed">Anyone with the family phrase can add photos. Tap a photo, then Add the course, to tag where it was.</p>
   </section>`;
@@ -2605,7 +2624,6 @@ document.addEventListener("click", e => {
   if (act === "bets") betsForm(id);
   if (act === "add-photo") photoForm();
   if (act === "photo") photoView(id, viewGallery.course);
-  if (act === "gcourse") { viewGallery.course = b.dataset.v || null; render(); }
   if (act === "press") pressForm(id);
   if (act === "unpress") unpress(id, Number(b.dataset.v));
   if (act === "money") moneyForm(state.matches.find(m => m.id === id));
@@ -2618,6 +2636,7 @@ document.addEventListener("click", e => {
 // Keep the Strokes section open or closed while the live card redraws.
 document.addEventListener("toggle", e => { if (e.target.classList?.contains("strokesd")) viewCard._strokes = e.target.open; }, true);
 document.addEventListener("change", e => {
+  if (e.target.dataset.act === "gfilter") { viewGallery.f = e.target.value; render(); return; }
   if (e.target.id === "calcCourse") {
     const c = state.courses.find(x => x.id === e.target.value);
     $("#calcOut").innerHTML = strokesLine(c, PLAYERS.map(p => p.slug));

@@ -18,7 +18,7 @@ Tabs (built in `app.js`):
   - **Fast taps:** for 0.45 seconds after the hole changes, taps on the card are ignored, so quick taps can't land on the next hole or skip one. Buttons use `touch-action: manipulation`, so fast double taps don't zoom the page (pinch zoom still works). Code: `goHole`, `cardAction`, `ADV_MS`, `HOLE_SETTLE_MS` in `app.js`.
 - **Head to Head:** matchups, handicaps, upcoming rounds, the Master Champ belt, every hole-by-hole scorecard (Scorecards section), and the saved guests (Guests section, which replaced the old Course scorecards editor).
 - **One tab per player** (Trent, Logan, Dad): a **Start a solo round** button (opens the form set to Individual), round log, handicap, best scores, and that player's hole-by-hole scorecards (Scorecards section).
-- **Gallery:** course photos, filterable by course.
+- **Gallery:** course photos. One **Show** dropdown picks what you see and how it is laid out: all photos by month, by round (date, course and who played), or by course (most photos first), or just one player's (photos from rounds they played) or one course's. It replaced the sideways row of course chips. Code: `viewGallery` (`gfilter`) in `app.js`.
 
 Features worth knowing:
 - **Games:** match play, stroke play (gross), net stroke play, skins, Stableford. Strokes are given off the lowest course handicap in the group, on the hardest holes. Money is optional (see Money below).

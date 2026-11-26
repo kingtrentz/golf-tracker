@@ -2038,7 +2038,10 @@ function viewCard(id) {
         <button type="button" class="satbtn satclr" aria-label="Clear target" hidden>✕</button>
         <button type="button" class="satbtn satexp" aria-label="Expand hole map">⤢</button>
       </div>
-      <button type="button" class="mapme" data-act="pinmap" data-id="${id}" data-v="${hole}" data-mapme="${id}:${hole}" hidden><b>Hole ${hole + 1} isn't mapped</b><span>Tap to set the tee and green on the satellite</span></button>
+      <div class="mapme" data-mapme="${id}:${hole}" hidden>
+        <button type="button" class="mapme-open" data-act="pinmap" data-id="${id}" data-v="${hole}"><b>Hole ${hole + 1} isn't mapped</b><span>Tap to set the tee and green on the satellite, or use GPS when you're standing there</span></button>
+        <div class="mapme-gps"><button type="button" data-act="gpspin" data-id="${id}" data-v="${hole}" data-k="t">I'm on the tee</button><button type="button" data-act="gpspin" data-id="${id}" data-v="${hole}" data-k="g">I'm on the green</button></div>
+      </div>
       <div class="hnote" data-hnote="${id}:${hole}">${ydHoleNote(card, hole)}</div>
       ${card.players.map(s => {
         const v = holeVals(card, s)[hole];
@@ -2651,6 +2654,7 @@ document.addEventListener("click", e => {
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
   if (["hole", "sc", "par", "theme", "ctab"].includes(act)) cardAction(act, b);
   if (act === "yds") ydToggle();
+  if (act === "gpspin") { const c = cardById(id); if (c) gpsPin(c, Number(b.dataset.v), b.dataset.k, b); }
   if (act === "pinmap" || act === "pinmatch") { const c = act === "pinmap" ? cardById(id) : matchPc(state.matches.find(m => m.id === id)); if (c) openPinMap(c, Number(b.dataset.v)); }
 });
 // Keep the Strokes section open or closed while the live card redraws.
@@ -3424,13 +3428,49 @@ async function openPinMap(card, hole) {
     };
   });
 }
+// "I'm on the tee" / "I'm on the green": save one point of an unmapped hole at your GPS spot, as you play.
+// Keeps whatever was saved before for the other point; the satellite shows once both are known.
+function gpsPin(card, hole, k, btn) {
+  if (!editing()) return phraseForm(() => gpsPin(card, hole, k));
+  if (!("geolocation" in navigator)) return toast("GPS not supported on this device");
+  const course = card.course_name, no = hole + 1;
+  const label = btn?.textContent;
+  const done = () => { if (btn) { btn.disabled = false; btn.textContent = label; } };
+  if (btn) { btn.disabled = true; btn.textContent = "Getting your spot…"; }
+  navigator.geolocation.getCurrentPosition(async p => {
+    const yds = Math.round(p.coords.accuracy * M2Y);
+    if (yds > 40) { done(); return toast(`GPS is only within about ${yds} yds right now. Give it a few seconds and tap again.`); }
+    const old = (state.hole_pins || []).find(x => x.course_name === course && x.hole === no) || {};
+    const row = { tee_lat: old.tee_lat ?? null, tee_lng: old.tee_lng ?? null, green_lat: old.green_lat ?? null, green_lng: old.green_lng ?? null };
+    if (k === "t") { row.tee_lat = p.coords.latitude; row.tee_lng = p.coords.longitude; }
+    else { row.green_lat = p.coords.latitude; row.green_lng = p.coords.longitude; }
+    try {
+      if (!DEMO) await rpc("gt_pin", { course, hole_no: no, tlat: row.tee_lat, tlng: row.tee_lng, glat: row.green_lat, glng: row.green_lng });
+    } catch (err) { done(); return toast("Couldn't save: " + errMsg(err)); }
+    const list = state.hole_pins ||= [];
+    const i = list.findIndex(x => x.course_name === course && x.hole === no);
+    if (i >= 0) list.splice(i, 1);
+    list.push({ course_name: course, hole: no, ...row });
+    if (btn) btn.disabled = false;
+    satBases.clear(); yd.fixKey = ""; render(); ydPaint();
+    const h = ydHole(card, hole);
+    toast(h ? `Hole ${no} mapped.` : k === "t" ? `Tee saved for hole ${no}. Tap "I'm on the green" when you get there.` : `Green saved for hole ${no}. Tap "I'm on the tee" next time you're on it.`);
+  }, e => { done(); toast(e.code === 1 ? "Location blocked. Allow it in Safari Settings." : "Could not get GPS. Try again."); },
+  { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+}
 function satPaint() {
   document.querySelectorAll("[data-sat]").forEach(async wrap => {
     const [id, hIdx] = wrap.dataset.sat.split(":");
     const hole = +hIdx, card = cardById(id);
     if (!card) return;
     const h = ydHole(card, hole), me = wrap.parentNode?.querySelector(`[data-mapme="${id}:${hole}"]`);
-    if (me) me.hidden = !!h || !ydDone(card);
+    if (me) {
+      me.hidden = !!h || !ydDone(card);
+      // Half mapped (tee or green saved by GPS): say which is done so the other one is easy to find.
+      const part = ydGreens(card)?.[hole + 1], tb = me.querySelector('[data-k="t"]'), gb = me.querySelector('[data-k="g"]');
+      if (tb && !tb.disabled) tb.textContent = part?.t ? "Tee saved ✓" : "I'm on the tee";
+      if (gb && !gb.disabled) gb.textContent = part?.g?.length ? "Green saved ✓" : "I'm on the green";
+    }
     if (!h) { wrap.hidden = true; return; }
     wrap.hidden = false;
     const cv = $(".satcv", wrap), clr = $(".satclr", wrap), exp = $(".satexp", wrap), hint = $(".sathint", wrap);

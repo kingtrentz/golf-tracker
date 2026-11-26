@@ -3238,7 +3238,8 @@ async function openPinMap(card, hole) {
       }
       line.setLatLngs(pts.t && pts.g ? [pts.t, pts.g] : []);
       m.querySelectorAll("[data-pm]").forEach(b => b.classList.toggle("on", b.dataset.pm === mode));
-      step.textContent = mode === "t" ? `Zoom in and tap the tee box for hole ${no}.` : `Now tap the middle of the green.`;
+      step.textContent = !moved.t && !moved.g && pts.t && pts.g ? `Tap where the ${mode === "t" ? "tee" : "green"} really is (pick Tee or Green above), or drag a pin.`
+        : mode === "t" ? `Zoom in and tap the tee box for hole ${no}.` : `Now tap the middle of the green.`;
       if (pts.t && pts.g) {
         const y = Math.round(ydDist(pts.t, pts.g) * M2Y);
         yds.innerHTML = `Tee to green: <b>${y} yds</b>${y < 40 || y > 700 ? ` <span class="warnt">That looks off. Check the spots.</span>` : ""} <span class="muted">Drag either pin to adjust.</span>`;

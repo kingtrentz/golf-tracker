@@ -852,3 +852,4 @@ body[data-tab="card"] .endbtn { padding: 9px; }
 .pinmk-t { background: #bfa478; color: #150c17; }
 .pinmk-g { background: #f5efe4; font-size: 14px; }
 .pinmodes button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 700; }
+.pin-sheet button:disabled { opacity: .45; }

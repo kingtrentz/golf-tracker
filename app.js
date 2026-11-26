@@ -497,6 +497,7 @@ function viewPlayer(slug) {
   const avg = last10.length ? r1(last10.reduce((s, r) => s + r.score, 0) / last10.length) : null;
   const rec = playerRecord(slug);
   const ptsR = full.filter(r => r.points != null);
+  const ld = rs.reduce((b, r) => { (r.drives || []).forEach((v, i) => { if (v != null && (!b || v > b.yds)) b = { yds: v, hole: i + 1, r }; }); return b; }, null);
   const ch = championship();
   const champ = ch.holder === slug ? `<span class="belt">🏆 Master Champ</span>` : "";
   const idxSub = hc.index == null ? "posts after the first round" : hc.count === 0 ? "starting · moves every round" : hc.last == null ? `${hc.count} round${hc.count === 1 ? "" : "s"}` : `${hc.last > 0 ? "▲ " + hc.last.toFixed(1) : hc.last < 0 ? "▼ " + Math.abs(hc.last).toFixed(1) : "no change"} last round`;
@@ -534,6 +535,7 @@ function viewPlayer(slug) {
     ${statTile("Match record", `${rec.w}-${rec.l}${rec.t ? "-" + rec.t : ""}`, "W-L-T vs both")}
     ${statTile("Stableford best", ptsR.length ? Math.max(...ptsR.map(r => r.points)) : "–", ptsR.length ? `avg ${r1(ptsR.reduce((a, r) => a + r.points, 0) / ptsR.length)} · last ${ptsR[ptsR.length - 1].points}` : "from live scorecards")}
     ${(() => { const L = moneyLedger(); const v = L.net[slug] ?? 0; return statTile("Money", `<span class="${moneyCls(v)}">${moneySigned(v)}</span>`, L.games ? "all time" : "no bets yet"); })()}
+    ${ld ? statTile("Longest drive", `${ld.yds} yds`, `hole ${ld.hole} · ${esc(ld.r.course_name)} · ${fmtShort(ld.r.played_on)}`) : ""}
   </div>
   <section class="card"><h3>Handicap over time</h3>${lineChart([{ name: p.name, color: p.color, points: indexHistory(slug) }])}</section>
   <section class="card"><h3>Courses</h3>${courseRows ? `<table class="t"><thead><tr><th>Course</th><th class="n">Rds</th><th class="n">Best</th><th class="n">Avg</th></tr></thead><tbody>${courseRows}</tbody></table>` : `<div class="empty">No rounds yet.</div>`}</section>
@@ -1832,7 +1834,7 @@ async function flushSaves() {
       for (const s of [...set]) {
         if (DEMO) { set.delete(s); continue; }
         const parsOnly = s === "__pars";
-        const { error } = await sb.rpc("gt_card_score", { p: state.phrase || "", cid: id, slug: parsOnly ? null : s, vals: parsOnly ? null : holeVals(card, s), pars: card.pars });
+        const { error } = await sb.rpc("gt_card_score", { p: state.phrase || "", cid: id, slug: parsOnly ? null : s, vals: parsOnly ? null : s === "__drives" ? cardDrives(card) : holeVals(card, s), pars: card.pars });
         if (error) throw error;
         set.delete(s);
       }
@@ -2011,11 +2013,14 @@ function viewCard(id) {
       <td class="sts">${x.t.thru ? `<b>${fmtToPar(x.t.toPar)}</b><small>${x.t.gross}</small>` : `<span class="muted">–</span>`}</td>
       <td class="stp">${x.t.thru ? `<b>${sk ? x.sk : x.p.pts}</b>` : `<span class="muted">–</span>`}</td>
       ${multi ? card.players.map(o => vs(x.s, o)).join("") : ""}</tr>`).join("")}</tbody></table>`;
-  const standings = `<section class="card live-top lbcard">${chips}${meta}${rateWarn}${latest}${stable}<div class="headline under">${esc(st.head)}</div><details class="strokesd" ${viewCard._strokes ? "open" : ""}><summary class="muted small">Strokes</summary>${hcpline}${noSis}</details></section>`;
+  const ld = longestDrive(card);
+  const ldLine = ld ? `<div class="ldrive">Longest drive: ${esc(pname(ld.s))} ${ld.yds} yds (hole ${ld.hole})</div>` : "";
+  const standings = `<section class="card live-top lbcard">${chips}${meta}${rateWarn}${latest}${stable}<div class="headline under">${esc(st.head)}</div>${ldLine}<details class="strokesd" ${viewCard._strokes ? "open" : ""}><summary class="muted small">Strokes</summary>${hcpline}${noSis}</details></section>`;
   const top = `<section class="card live-top">
     ${chips}
     ${meta}
     <div class="headline">${esc(st.head)}</div>
+    ${ldLine}
     ${latest}
     ${lboard}
     ${mlines}
@@ -2053,6 +2058,7 @@ function viewCard(id) {
           <button class="step" data-act="sc" data-s="${s}" data-d="1" aria-label="${esc(pname(s))} one more">+</button>
         </div>`;
       }).join("")}
+      ${driveBar(card, hole)}
       <div class="hfoot"><span><span id="savestate" class="savestate"></span><span id="autoadv" class="autoadv">${cardAction._advFor === id + ":" + hole ? `Hole ${hole + 2} next…` : ""}</span></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Submit round</button>`}</div>
     </section>` : `<p class="hint center">Updates by itself. Tap Enter scores to keep score.</p>`;
 
@@ -2584,6 +2590,7 @@ function finishForm(id) {
           const cc = { ...card, rating: c.rating, slope: c.slope, par: c.par };
           await save("rounds", { player: x.s, played_on: card.played_on, holes: n, score: x.t.gross, hole_scores: holeVals(card, x.s), points: cardPts(cc, x.s).pts,
             course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: n === 9 && c.par >= 50 ? parSum : c.par, course_id, match_id: matchId,
+            ...(cardDrives(card)[x.s]?.some(v => v != null) ? { drives: card.pars.map((_, i) => cardDrives(card)[x.s][i] ?? null) } : {}),
             ...(isGuest(x.s) ? { notes: "Guest: " + pname(x.s) } : {}) });
         }
         const gNames = Object.fromEntries(card.players.filter(isGuest).map(s => [s, { name: pname(s) }]));
@@ -2654,6 +2661,10 @@ document.addEventListener("click", e => {
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
   if (["hole", "sc", "par", "theme", "ctab"].includes(act)) cardAction(act, b);
   if (act === "yds") ydToggle();
+  if (act === "drive") { const c = cardById(id); if (c) markDrive(c, Number(b.dataset.v), b); }
+  if (act === "drive-who") { const c = cardById(id), a = driveBar._ask; if (c && a && a.id === id) saveDrive(c, b.dataset.s, a.h, a.yds, a.note); }
+  if (act === "drive-x") { if (driveBar._ask?.id === id) driveBar._ask = null; else localStorage.removeItem("golf_drvtee_" + id); render(); }
+  if (act === "drive-del") { const c = cardById(id); if (c) delDrive(c, b.dataset.s, Number(b.dataset.v)); }
   if (act === "gpspin") { const c = cardById(id); if (c) gpsPin(c, Number(b.dataset.v), b.dataset.k, b); }
   if (act === "pinmap" || act === "pinmatch") { const c = act === "pinmap" ? cardById(id) : matchPc(state.matches.find(m => m.id === id)); if (c) openPinMap(c, Number(b.dataset.v)); }
 });
@@ -2738,7 +2749,7 @@ document.addEventListener("click", e => {
   // Scores typed with no signal are kept on the phone; send them now.
   for (const c of state.cards) {
     try { const saved = JSON.parse(localStorage.getItem("golf_card_" + c.id) || "null");
-      if (saved && editing()) { c.scores = { ...c.scores, ...saved.scores }; c.pars = saved.pars || c.pars; Object.keys(saved.scores || {}).filter(s => !s.startsWith("__")).forEach(s => queueSave(c, s)); queueSave(c, "__pars"); } } catch (e) { /* ignore */ }
+      if (saved && editing()) { c.scores = { ...c.scores, ...saved.scores }; c.pars = saved.pars || c.pars; Object.keys(saved.scores || {}).filter(s => !s.startsWith("__")).forEach(s => queueSave(c, s)); if (saved.scores?.__drives) queueSave(c, "__drives"); queueSave(c, "__pars"); } } catch (e) { /* ignore */ }
   }
   route();
   alertsInit(); // after the database client is ready
@@ -3427,6 +3438,69 @@ async function openPinMap(card, hole) {
       catch (err) { toast("Couldn't reset: " + errMsg(err)); }
     };
   });
+}
+// ---------- Mark drive: tap on the tee, tap again where the ball stopped ----------
+// Drives live on the card in card.scores.__drives = { slug: [yds per hole] } (saved through gt_card_score like
+// a player's scores), and each posted round keeps its own list in rounds.drives. Same GPS rule as the tee/green
+// buttons: a fix worse than about 40 yds is refused. The tee spot is kept on this phone, so several balls can be
+// measured from one tee. Par 3s get no button.
+const DRIVE_MAX_ACC = 40;
+const cardDrives = card => card?.scores?.__drives || {};
+function driveTee(id) { try { return JSON.parse(localStorage.getItem("golf_drvtee_" + id) || "null"); } catch (e) { return null; } }
+function longestDrive(card) {
+  let best = null;
+  for (const [s, a] of Object.entries(cardDrives(card))) if (card.players.includes(s))
+    (a || []).forEach((v, i) => { if (v != null && (!best || v > best.yds)) best = { s, yds: v, hole: i + 1 }; });
+  return best;
+}
+function driveBar(card, hole) {
+  if (card.pars[hole] < 4) return "";
+  const id = card.id, d = cardDrives(card), first = s => esc(pname(s).split(" ")[0]);
+  const ask = driveBar._ask?.id === id && driveBar._ask.h === hole ? driveBar._ask : null;
+  if (ask) return `<div class="drivebar"><span class="drq">${ask.yds} yds. Whose?</span>${card.players.map(s =>
+    `<button type="button" data-act="drive-who" data-id="${id}" data-s="${s}">${first(s)}</button>`).join("")}<button type="button" class="drx" data-act="drive-x" data-id="${id}" aria-label="Cancel">✕</button></div>`;
+  const t = driveTee(id), on = t && t.h === hole;
+  const got = card.players.filter(s => d[s]?.[hole] != null).map(s =>
+    `<button type="button" class="drv" data-act="drive-del" data-id="${id}" data-s="${s}" data-v="${hole}">${first(s)} ${d[s][hole]}</button>`).join("");
+  return `<div class="drivebar">${on ? `<button type="button" class="drbtn on" data-act="drive" data-id="${id}" data-v="${hole}">At the ball: measure</button><button type="button" class="drx" data-act="drive-x" data-id="${id}" aria-label="Clear the tee mark">✕</button>`
+    : `<button type="button" class="drbtn" data-act="drive" data-id="${id}" data-v="${hole}">Mark drive</button>`}${got ? `<span class="drvs">${got}</span>` : ""}</div>`;
+}
+function markDrive(card, hole, btn) {
+  if (!editing()) return phraseForm(() => markDrive(card, hole));
+  if (!("geolocation" in navigator)) return toast("GPS not supported on this device");
+  const id = card.id, t = driveTee(id), tee = t && t.h === hole ? t : null;
+  const label = btn?.textContent;
+  const done = () => { if (btn?.isConnected) { btn.disabled = false; btn.textContent = label; } };
+  if (btn) { btn.disabled = true; btn.textContent = "Getting your spot…"; }
+  navigator.geolocation.getCurrentPosition(p => {
+    const acc = Math.round(p.coords.accuracy * M2Y);
+    if (acc > DRIVE_MAX_ACC) { done(); return toast(`GPS is only within about ${acc} yds right now. Give it a few seconds and tap again.`); }
+    if (!tee) {
+      try { localStorage.setItem("golf_drvtee_" + id, JSON.stringify({ h: hole, lat: p.coords.latitude, lng: p.coords.longitude, acc })); } catch (e) { /* full */ }
+      render(); return toast("Tee marked. Tap again where the ball stopped.");
+    }
+    const yds = Math.round(ydDist([tee.lat, tee.lng], [p.coords.latitude, p.coords.longitude]) * M2Y);
+    if (yds < 20) { done(); return toast(`That's only ${yds} yds from the tee. Tap again once you're at the ball.`); }
+    if (yds > 450) { done(); return toast(`That reads ${yds} yds, so the GPS jumped. Tap again.`); }
+    const worst = Math.max(acc, tee.acc || 0), note = worst > 15 ? ` (GPS within about ${worst} yds)` : "";
+    if (card.players.length === 1) return saveDrive(card, card.players[0], hole, yds, note);
+    driveBar._ask = { id, h: hole, yds, note }; render();
+  }, e => { done(); toast(e.code === 1 ? "Location blocked. Allow it in Safari Settings." : "Could not get GPS. Try again."); },
+  { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+}
+function saveDrive(card, s, hole, yds, note = "") {
+  const d = card.scores.__drives ||= {};
+  const a = card.pars.map((_, i) => d[s]?.[i] ?? null);
+  a[hole] = yds; d[s] = a;
+  driveBar._ask = null; queueSave(card, "__drives"); render();
+  toast(`${pname(s)} ${yds} yds on hole ${hole + 1}${note}. Tap it to remove.`);
+}
+function delDrive(card, s, hole) {
+  const a = cardDrives(card)[s];
+  if (a?.[hole] == null || !confirm(`Remove ${pname(s)}'s ${a[hole]} yd drive on hole ${hole + 1}?`)) return;
+  a[hole] = null;
+  if (!a.some(v => v != null)) delete card.scores.__drives[s];
+  queueSave(card, "__drives"); render();
 }
 // "I'm on the tee" / "I'm on the green": save one point of an unmapped hole at your GPS spot, as you play.
 // Keeps whatever was saved before for the other point; the satellite shows once both are known.

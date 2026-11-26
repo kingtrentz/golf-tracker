@@ -64,6 +64,7 @@ alter table courses add column if not exists pars int[];
 alter table courses add column if not exists lat double precision;
 alter table courses add column if not exists lng double precision;
 alter table rounds  add column if not exists hole_scores int[];
+alter table rounds  add column if not exists drives int[];  -- yards per hole from "Mark drive" (see supabase/migrations/2026-11-26_drives.sql)
 
 create table if not exists cards (
   id uuid primary key default gen_random_uuid(),

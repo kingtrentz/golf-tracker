@@ -3234,6 +3234,21 @@ function matchMapNote(m) {
   const head = miss.length === n ? "No holes mapped at this course yet" : `${miss.length} of ${n} holes not mapped yet (${holeList(miss.map(i => i + 1))})`;
   return `<button type="button" class="mapme" data-act="pinmatch" data-id="${m.id}" data-v="${miss[0]}"><b>${head}</b><span>Tap to map hole ${miss[0] + 1} on the satellite</span></button>`;
 }
+// Everything OpenStreetMap has around a course (greens, tees, fairways, bunkers, water, hole lines, the course outline),
+// whether or not it's tied to a hole number. Shown under the pins so a hole with no data can be placed by eye.
+const pinCtxCache = {};
+function pinCtx(card) {
+  const loc = ydCourse(card); if (!loc) return Promise.resolve(null);
+  const k = `${loc.lat.toFixed(4)},${loc.lng.toFixed(4)}`;
+  return pinCtxCache[k] ||= (async () => {
+    const a = `(around:1800,${loc.lat},${loc.lng})`;
+    const q = `[out:json][timeout:25];(way["golf"~"^(green|tee|fairway|bunker|water_hazard|lateral_water_hazard|hole)$"]${a};way["natural"="water"]${a};way["leisure"="golf_course"]${a};relation["leisure"="golf_course"]${a};);out tags geom;`;
+    for (const u of OVERPASS) {
+      try { const r = await timed(u, { method: "POST", body: "data=" + encodeURIComponent(q) }, 30000); if (r.ok) return (await r.json()).elements || []; } catch (e) { /* next */ }
+    }
+    delete pinCtxCache[k]; return null;
+  })();
+}
 async function openPinMap(card, hole) {
   if (!editing()) return phraseForm(() => openPinMap(card, hole));
   const course = card.course_name, no = hole + 1;
@@ -3247,6 +3262,7 @@ async function openPinMap(card, hole) {
     <p class="hint pinstep" id="pinstep"></p>
     <div class="chips pinmodes"><button type="button" data-pm="t">Tee</button><button type="button" data-pm="g">Green</button></div>
     <div class="pinmap" id="pinmap"><div class="empty">Loading satellite…</div></div>
+    <div class="pinkey"><span class="k-h">Holes already mapped</span><span class="k-o">Other map data</span></div>
     <div class="pinyds" id="pinyds"></div>
     <div class="acts"><button type="button" class="primary" id="pinsave" disabled>Save hole ${no}</button><button type="button" id="pingps">Tee is where I'm standing</button></div>
     ${pin && bh ? `<div class="acts"><button type="button" id="pinreset">Go back to the map's own spots</button></div>` : ""}
@@ -3259,7 +3275,9 @@ async function openPinMap(card, hole) {
     const map = L.map(el, { zoomControl: true, attributionControl: false, maxZoom: 20 });
     L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 19, maxZoom: 20 }).addTo(map);
     // Start view: this hole if it has both spots, otherwise the whole course.
+    const near = [no - 1, no + 1].map(n => ydHole(card, n - 1)).filter(Boolean).flatMap(h => [h.t, ydGreenCenter(h.g)]);
     if (pts.t && pts.g) map.fitBounds(L.latLngBounds([pts.t, pts.g]), { padding: [40, 40], maxZoom: 18 });
+    else if (near.length) { if (pts.t) near.push(pts.t); map.fitBounds(L.latLngBounds(near).pad(0.6), { maxZoom: 17 }); } // the holes either side, so this one is easy to find
     else {
       const all = Object.values(ydGreens(card) || {}).flatMap(h => h?.t && h?.g?.length ? [h.t, ydGreenCenter(h.g)] : []);
       const loc = ydCourse(card); if (loc) all.push([loc.lat, loc.lng]);
@@ -3270,6 +3288,37 @@ async function openPinMap(card, hole) {
       else { map.setView([39.5, -98.35], 4); toast("Couldn't find this course on the map. Zoom in to it."); }
     }
     setTimeout(() => map.invalidateSize(), 60);
+    // Every other hole already mapped at this course: green, tee-to-green line, and its number.
+    const ctx = L.layerGroup().addTo(map), num = (n, cls) => L.divIcon({ className: "pinno " + cls, html: String(n), iconSize: [22, 22], iconAnchor: [11, 11] });
+    for (let i = 0; i < card.pars.length; i++) {
+      const h = i === hole ? null : ydHole(card, i); if (!h) continue;
+      const gc = ydGreenCenter(h.g);
+      L.polygon(h.g, { color: "#bfa478", weight: 1.5, fillOpacity: 0.12, interactive: false }).addTo(ctx);
+      L.polyline([h.t, gc], { color: "#bfa478", weight: 2, opacity: 0.8, interactive: false }).addTo(ctx);
+      L.circleMarker(h.t, { radius: 3, color: "#bfa478", fillOpacity: 1, interactive: false }).addTo(ctx);
+      L.marker(gc, { icon: num(i + 1, "on"), interactive: false, keyboard: false }).addTo(ctx);
+    }
+    // Then everything else the map has, in muted colours, behind the holes.
+    pinCtx(card).then(els => {
+      if (!els || !el.isConnected) return;
+      const under = L.layerGroup().addTo(map);
+      const geo = g => (g || []).map(p => [p.lat, p.lon]);
+      const sty = { green: ["#8fd18f", 0.18], tee: ["#e7dcc4", 0.25], fairway: ["#8fd18f", 0.06], bunker: ["#f1e3b3", 0.3], water_hazard: ["#6fb3ff", 0.25], lateral_water_hazard: ["#6fb3ff", 0.25], water: ["#6fb3ff", 0.2] };
+      for (const w of els) {
+        const t = w.tags || {};
+        if (w.type === "relation") { (w.members || []).filter(mb => mb.role !== "inner" && mb.geometry).forEach(mb => L.polyline(geo(mb.geometry), { color: "#f5efe4", weight: 1.5, dashArray: "6 6", opacity: 0.7, interactive: false }).addTo(under)); continue; }
+        const g = geo(w.geometry); if (g.length < 2) continue;
+        if (t.leisure === "golf_course") { L.polyline(g, { color: "#f5efe4", weight: 1.5, dashArray: "6 6", opacity: 0.7, interactive: false }).addTo(under); continue; }
+        if (t.golf === "hole") {
+          L.polyline(g, { color: "#d9d2c3", weight: 1.5, dashArray: "3 5", opacity: 0.8, interactive: false }).addTo(under);
+          if (/^\d+$/.test(t.ref || "")) L.marker(g[g.length - 1], { icon: num(t.ref, "off"), interactive: false, keyboard: false }).addTo(under);
+          continue;
+        }
+        const st = sty[t.golf] || (t.natural === "water" ? sty.water : null); if (!st || g.length < 3) continue;
+        L.polygon(g, { color: st[0], weight: 1, opacity: 0.7, fillOpacity: st[1], interactive: false }).addTo(under);
+      }
+      under.eachLayer(l => l.bringToBack?.()); // keep the pins and mapped holes on top
+    });
     const icon = k => L.divIcon({ className: "pinmk pinmk-" + k, html: k === "t" ? "T" : "⛳", iconSize: [28, 28], iconAnchor: [14, 14] });
     const mk = {}, line = L.polyline([], { color: "#f5efe4", weight: 2, dashArray: "5 5", interactive: false }).addTo(map);
     const step = $("#pinstep", m), yds = $("#pinyds", m), sv = $("#pinsave", m);

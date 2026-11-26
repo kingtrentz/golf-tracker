@@ -804,6 +804,7 @@ body[data-tab="card"] .hfoot { margin-top: 6px; }
 body[data-tab="card"] .hfoot .primary { padding: 8px 14px; }
 body[data-tab="card"] .live-top .lt-meta { font-size: 12px; }
 body[data-tab="card"] .lbcard .headline { font-size: clamp(14px, 3.8vw, 17px); margin: 4px 0 2px; }
+body[data-tab="card"] .lbcard .headline.under { margin: 10px 0 2px; }
 body[data-tab="card"] .lbcard .latest { margin: 2px 0 0; font-size: 12px; text-align: center; }
 body[data-tab="card"] .strokesd { margin-top: 4px; }
 body[data-tab="card"] .endwrap { margin: 0 0 8px; }

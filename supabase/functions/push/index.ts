@@ -8,7 +8,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import webpush from "npm:web-push@3.6.7";
 import { createECDH, createPrivateKey } from "node:crypto";
 import { Buffer } from "node:buffer";
-import { type Alert, type Card, cardAlerts, type World } from "./golf.ts";
+import { type Alert, type Card, cardAlerts, guestView, type World } from "./golf.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -94,11 +94,11 @@ export async function processCards(sb: any, cardIds: string[] | "sweep", now = D
   const { data: subs } = await sb.from("push_subs").select("*");
   let sent = 0;
   for (const raw of cards) {
-    const card = num(raw);
+    const { card, w: cw } = guestView(num(raw), w);
     const age = now - Date.parse(card.updated_at || card.created_at || "");
     if (age > 6 * 3600e3) continue; // old card touched later: stay quiet
     const match = card.status === "done" && card.match_id ? (await sb.from("matches").select("bets").eq("id", card.match_id).maybeSingle()).data : null;
-    const alerts = cardAlerts(card, w, now, match);
+    const alerts = cardAlerts(card, cw, now, match);
     const { data: done } = await sb.from("push_sent").select("key").in("key", alerts.map(a => a.key));
     const have = new Set((done || []).map((x: any) => x.key));
     const fresh = alerts.filter(a => !have.has(a.key));

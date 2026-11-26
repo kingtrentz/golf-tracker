@@ -768,3 +768,15 @@ body[data-tab="card"] .totop, body[data-tab="card"] .abyss { display: none !impo
 .rscgo { flex: none; color: var(--gold); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
 .tagbtn { background: none; font: inherit; font-size: 11px; cursor: pointer; color: var(--gold); border-color: var(--gold-line); }
 .rscsub { margin: -8px 0 12px; padding: 0; }
+
+/* Guests: picker on the start forms, hollow dot so they read as visitors */
+.gpicker { margin: 4px 0 12px; }
+.gpicker > select { margin-bottom: 6px; }
+.glist .grow { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.glist .grow:first-child { border-top: 1px solid var(--line); }
+.glist .grow label.chk { margin: 0; font-size: 14px; }
+.glist .gname { min-width: 0; overflow-wrap: anywhere; }
+.gnew { margin: 4px 0 8px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; }
+.gnew .acts { margin-top: 8px; }
+.gpicker .hint { margin-top: 6px; }
+.dot.gdot { background: transparent !important; box-shadow: inset 0 0 0 2px #8a8f98; }

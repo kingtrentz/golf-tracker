@@ -259,17 +259,19 @@ async function loadData() {
     Object.assign(state, d);
     state.cards = state.cards || [];
     state.guests = state.guests || [];
+    state.hole_pins = state.hole_pins || [];
     splitGuests();
     stampUpd();
     return;
   }
-  const [r, m, c, pl, cd, gs] = await Promise.all([
+  const [r, m, c, pl, cd, gs, hp] = await Promise.all([
     sb.from("rounds").select("*").order("played_on"),
     sb.from("matches").select("*").order("scheduled_for"),
     sb.from("courses").select("*").order("name"),
     sb.from("players").select("*"),
     sb.from("cards").select("*").eq("status", "live").order("created_at"),
     sb.from("guests").select("*"),
+    sb.from("hole_pins").select("*"),
     loadPhotos().catch(() => {})
   ]);
   for (const x of [r, m, c]) if (x.error) throw x.error;
@@ -280,6 +282,8 @@ async function loadData() {
   state.courses = c.data.map(x => ({ ...x, rating: Number(x.rating), slope: Number(x.slope), par: Number(x.par) }));
   state.cards = (cd.data || []).map(x => ({ ...x, rating: x.rating == null ? null : Number(x.rating) }));
   state.guests = gs.error ? [] : (gs.data || []).map(x => ({ ...x, handicap: x.handicap == null ? null : Number(x.handicap) }));
+  state.hole_pins = hp.error ? [] : (hp.data || []);
+  satBases.clear();
   splitGuests();
   stampUpd();
 }
@@ -1711,6 +1715,7 @@ function confirmCard(m, step1, d, go) {
       <p class="hint">${d.solo ? "Solo round: your gross score goes on your tab and moves your handicap." : isGross ? "Gross stroke play: playing straight up, no handicap strokes." : `${G.length > 1 ? (rows.some(x => x.got) ? "Strokes come off the lowest handicap in the group, on the hardest holes (● below). " : "Everyone plays level. ") : ""}${n === 9 ? "9 holes: half the course handicap. " : ""}Need to adjust a handicap for today? Edit any Course hcp box above before confirming.`}</p>
       ${flatPars && !editMode ? `<div class="warnt small">No hole pars saved for this course, so every hole shows par 4. Fix them below.</div>` : ""}
       ${noSis && !editMode && !isGross ? `<div class="warnt small">No hole handicaps saved, so strokes use the standard order. Add them below if the card has them.</div>` : ""}
+      ${editMode ? "" : `<div class="warnt small" data-unmapped>${unmappedNote(yd.pend = { course_name: d.course_name, course_id: d.course_id || null, pars, sis })}</div>`}
       ${editMode ? `<form id="cfx"><p class="hint">Copy par and handicap (HCP) for each hole from the scorecard.</p>${n === 18 ? editor(0, 9, "Out") + editor(9, 18, "In") : editor(0, n, "Hole")}
           <div class="acts"><button class="primary" type="submit">Done</button><button type="button" id="cfxc">Cancel</button></div></form>`
         : `${n === 18 ? half(0, 9, "Out") + half(9, 18, "In") : half(0, n, "Hole")}
@@ -2010,6 +2015,7 @@ function viewCard(id) {
         <button type="button" class="satbtn satclr" aria-label="Clear target" hidden>✕</button>
         <button type="button" class="satbtn satexp" aria-label="Expand hole map">⤢</button>
       </div>
+      <button type="button" class="mapme" data-act="pinmap" data-id="${id}" data-v="${hole}" data-mapme="${id}:${hole}" hidden><b>Hole ${hole + 1} isn't mapped</b><span>Tap to set the tee and green on the satellite</span></button>
       <div class="hnote" data-hnote="${id}:${hole}">${ydHoleNote(card, hole)}</div>
       ${card.players.map(s => {
         const v = holeVals(card, s)[hole];
@@ -2610,6 +2616,7 @@ document.addEventListener("click", e => {
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
   if (["hole", "sc", "par", "theme", "ctab"].includes(act)) cardAction(act, b);
   if (act === "yds") ydToggle();
+  if (act === "pinmap") { const c = cardById(id); if (c) openPinMap(c, Number(b.dataset.v)); }
 });
 // Keep the Strokes section open or closed while the live card redraws.
 document.addEventListener("toggle", e => { if (e.target.classList?.contains("strokesd")) viewCard._strokes = e.target.open; }, true);
@@ -2713,7 +2720,30 @@ function ydCourse(card) {
   const any = c?.lat != null ? c : state.courses.find(x => x.name.split(" (")[0] === card.course_name.split(" (")[0] && x.lat != null);
   return any ? { lat: any.lat, lng: any.lng } : null;
 }
+// Tee/green points tapped on the satellite (hole_pins table) win over the map data. A tapped green is a point,
+// so it gets a small ring around it (front/back aren't shown for it, only the middle).
 function ydGreens(card) {
+  const base = ydBase(card), pins = (state.hole_pins || []).filter(p => p.course_name === card.course_name);
+  if (!pins.length) return base;
+  const out = { ...(base || {}) };
+  for (const p of pins) {
+    const b = base?.[p.hole] || base?.[String(p.hole)], h = { ...(b || {}) };
+    if (p.tee_lat != null) h.t = [p.tee_lat, p.tee_lng];
+    if (p.green_lat != null) { h.g = ydRing([p.green_lat, p.green_lng], 10); h.pt = true; }
+    if (!b) h.nohz = true; // no hazard data for this hole
+    h.pinned = true;
+    out[p.hole] = h;
+  }
+  return out;
+}
+function ydRing(c, r) {
+  const kx = 111320 * Math.cos(c[0] * Math.PI / 180), ky = 110540;
+  return Array.from({ length: 16 }, (_, i) => { const a = i * Math.PI / 8; return [c[0] + r * Math.sin(a) / ky, c[1] + r * Math.cos(a) / kx]; });
+}
+// Map data for a course has come back (or there's none to wait for).
+function ydDone(card) { return !!(ydBase(card) || (yd.file && yd.asked[card.course_name] && yd.live[card.course_name])); }
+const ydHole = (card, hole) => { const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)]; return h?.t && h?.g?.length ? h : null; };
+function ydBase(card) {
   const key = card.course_name;
   if (yd.file?.[key]) return yd.file[key];
   if (yd.live[key]) return yd.live[key];
@@ -2806,6 +2836,7 @@ function ydText(card, hole) {
   if (n.on) return `<span class="ydmsg">On the green ↻</span>`;
   if (y(n.mid) > 700) return `<span class="ydmsg">Not near hole ${hole + 1} ↻</span>`;
   const acc = yd.pos.acc > 18 ? `<span class="ydacc">±${Math.round(yd.pos.acc * M2Y)}</span>` : "";
+  if (h.pt) return `<b>${y(n.mid)}</b><span class="ydf">middle</span>${acc}<span class="ydref" aria-hidden="true">↻</span>`;
   return `<span class="ydf">F ${y(n.front)}</span><b>${y(n.mid)}</b><span class="ydf">B ${y(n.back)}</span>${acc}<span class="ydref" aria-hidden="true">↻</span>`;
 }
 function ydGreenCenter(g) {
@@ -2928,7 +2959,7 @@ function ydHoleNote(card, hole) {
     bits.push(order.length >= 3 ? "Green guarded by sand all around" : `Sand ${order.join(" and ")} of the green`);
   }
   // Only call a hole clean when the map data has hazards for this course (some courses only have greens)
-  const mapped = Object.values(holes).some(x => x?.bk?.length || x?.wt?.length);
+  const mapped = !h.nohz && Object.values(holes).some(x => x?.bk?.length || x?.wt?.length);
   if (!bits.length && mapped) bits.push(par === 3 ? "Clean look at the green" : "Straightaway, nothing in the way");
   return esc(bits.slice(0, 3).join(" · "));
 }
@@ -2936,6 +2967,7 @@ function ydPaint() {
   document.querySelectorAll("[data-yds]").forEach(el => { const [id, h] = el.dataset.yds.split(":"); const card = cardById(id); if (card) el.innerHTML = ydText(card, +h); });
   document.querySelectorAll("[data-ryds]").forEach(el => { const [id, h] = el.dataset.ryds.split(":"); const card = cardById(id); if (card) el.textContent = ydRoughText(card, +h); });
   document.querySelectorAll("[data-hnote]").forEach(el => { const [id, h] = el.dataset.hnote.split(":"); const card = cardById(id); if (card) el.innerHTML = ydHoleNote(card, +h); });
+  document.querySelectorAll("[data-unmapped]").forEach(el => { el.innerHTML = unmappedNote(yd.pend); });
   satPaint();
 }
 
@@ -3117,8 +3149,10 @@ function openSatModal(card, hole) {
       <button type="button" class="satbtn satclr" id="satmclr" aria-label="Clear target" ${satTap[key] ? "" : "hidden"}>✕</button>
     </div>
     <div class="sat-foot"><span>${esc(card.course_name)}${card.tee_name ? " · " + esc(card.tee_name) : ""}</span><span>Imagery © Esri</span></div>
+    ${editing() ? `<div class="acts"><button type="button" id="satfix">Tee or green in the wrong spot? Fix it</button></div>` : ""}
   </div>`, async m => {
-    const cv = $("#satfull", m), clr = $("#satmclr", m);
+    const cv = $("#satfull", m), clr = $("#satmclr", m), fx = $("#satfix", m);
+    if (fx) fx.onclick = () => openPinMap(card, hole);
     const W = cv.clientWidth || 340, H = cv.clientHeight || 460;
     const base = await satBase(`${card.course_name}:${hole + 1}`, h, W, H, false);
     if (!cv.isConnected) return;
@@ -3128,13 +3162,140 @@ function openSatModal(card, hole) {
     clr.onclick = () => { delete satTap[key]; satDrawOverlay(cv, base, null, false); sync(); };
   });
 }
+// ---------- Map a hole by tapping the satellite (holes the map data is missing or has wrong) ----------
+// Leaflet (vendor/leaflet) only loads the first time this opens. Points save to hole_pins for everyone.
+let leafletP = null;
+function loadLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  return leafletP ||= new Promise((res, rej) => {
+    const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "vendor/leaflet/leaflet.css?v=194"; document.head.append(css);
+    const sc = document.createElement("script"); sc.src = "vendor/leaflet/leaflet.js?v=194";
+    sc.onload = () => res(window.L);
+    sc.onerror = () => { leafletP = null; sc.remove(); rej(new Error("Couldn't load the map. Check your signal and try again.")); };
+    document.head.append(sc);
+  });
+}
+// "6 to 18", "3, 7 and 9"
+function holeList(ns) {
+  const parts = [];
+  for (let i = 0; i < ns.length; i++) { let j = i; while (j + 1 < ns.length && ns[j + 1] === ns[j] + 1) j++; parts.push(j - i >= 2 ? `${ns[i]} to ${ns[j]}` : j > i ? `${ns[i]}, ${ns[j]}` : `${ns[i]}`); i = j; }
+  return parts.length > 1 ? parts.slice(0, -1).join(", ") + " and " + parts[parts.length - 1] : parts[0] || "";
+}
+// Before teeing off: say which holes have no map, so they can be tapped in first.
+function unmappedNote(pc) {
+  if (!pc) return "";
+  ydLoadFile(); ydGreens(pc);
+  if (!ydDone(pc)) return "";
+  const n = pc.pars.length, miss = [...Array(n).keys()].filter(i => !ydHole(pc, i)).map(i => i + 1);
+  if (!miss.length) return "";
+  if (miss.length === n) return `No hole maps for this course yet. On the live card, tap "isn't mapped" on a hole to set its tee and green on the satellite.`;
+  return `${miss.length} of ${n} holes aren't mapped yet (${holeList(miss)}). On the live card you can set each one's tee and green on the satellite, before or during the round.`;
+}
+async function openPinMap(card, hole) {
+  if (!editing()) return phraseForm(() => openPinMap(card, hole));
+  const course = card.course_name, no = hole + 1;
+  const base = ydBase(card), bh = base?.[no] || base?.[String(no)];
+  const pin = (state.hole_pins || []).find(p => p.course_name === course && p.hole === no);
+  const cur = ydHole(card, hole);
+  const pts = { t: cur?.t || null, g: cur ? ydGreenCenter(cur.g) : null }, moved = { t: false, g: false };
+  let mode = pts.t && !pts.g ? "g" : "t";
+  openModal(`<div class="pin-sheet">
+    <h2>Hole ${no} · Par ${card.pars[hole]}</h2>
+    <p class="hint pinstep" id="pinstep"></p>
+    <div class="chips pinmodes"><button type="button" data-pm="t">Tee</button><button type="button" data-pm="g">Green</button></div>
+    <div class="pinmap" id="pinmap"><div class="empty">Loading satellite…</div></div>
+    <div class="pinyds" id="pinyds"></div>
+    <div class="acts"><button type="button" class="primary" id="pinsave" disabled>Save hole ${no}</button><button type="button" id="pingps">Tee is where I'm standing</button></div>
+    ${pin && bh ? `<div class="acts"><button type="button" id="pinreset">Go back to the map's own spots</button></div>` : ""}
+    <div class="sat-foot"><span>${esc(course)}</span><span>Imagery © Esri</span></div>
+  </div>`, async m => {
+    let L;
+    try { L = await loadLeaflet(); } catch (err) { $("#pinmap", m).innerHTML = `<div class="empty">${esc(errMsg(err))}</div>`; return; }
+    const el = $("#pinmap", m); if (!el.isConnected) return;
+    el.innerHTML = "";
+    const map = L.map(el, { zoomControl: true, attributionControl: false, maxZoom: 20 });
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", { maxNativeZoom: 19, maxZoom: 20 }).addTo(map);
+    // Start view: this hole if it has both spots, otherwise the whole course.
+    if (pts.t && pts.g) map.fitBounds(L.latLngBounds([pts.t, pts.g]), { padding: [40, 40], maxZoom: 18 });
+    else {
+      const all = Object.values(ydGreens(card) || {}).flatMap(h => h?.t && h?.g?.length ? [h.t, ydGreenCenter(h.g)] : []);
+      const loc = ydCourse(card); if (loc) all.push([loc.lat, loc.lng]);
+      if (pts.t) all.push(pts.t);
+      if (!all.length && yd.pos) all.push([yd.pos.lat, yd.pos.lng]);
+      if (all.length > 1) map.fitBounds(L.latLngBounds(all).pad(0.15), { maxZoom: 17 });
+      else if (all.length) map.setView(all[0], 16);
+      else { map.setView([39.5, -98.35], 4); toast("Couldn't find this course on the map. Zoom in to it."); }
+    }
+    setTimeout(() => map.invalidateSize(), 60);
+    const icon = k => L.divIcon({ className: "pinmk pinmk-" + k, html: k === "t" ? "T" : "⛳", iconSize: [28, 28], iconAnchor: [14, 14] });
+    const mk = {}, line = L.polyline([], { color: "#f5efe4", weight: 2, dashArray: "5 5", interactive: false }).addTo(map);
+    const step = $("#pinstep", m), yds = $("#pinyds", m), sv = $("#pinsave", m);
+    const sync = () => {
+      for (const k of ["t", "g"]) {
+        if (pts[k] && !mk[k]) { mk[k] = L.marker(pts[k], { icon: icon(k), draggable: true }).addTo(map);
+          mk[k].on("dragend", () => { const p = mk[k].getLatLng(); pts[k] = [p.lat, p.lng]; moved[k] = true; sync(); }); }
+        else if (pts[k]) mk[k].setLatLng(pts[k]);
+      }
+      line.setLatLngs(pts.t && pts.g ? [pts.t, pts.g] : []);
+      m.querySelectorAll("[data-pm]").forEach(b => b.classList.toggle("on", b.dataset.pm === mode));
+      step.textContent = !moved.t && !moved.g && pts.t && pts.g ? `Tap where the ${mode === "t" ? "tee" : "green"} really is (pick Tee or Green above), or drag a pin.`
+        : mode === "t" ? `Zoom in and tap the tee box for hole ${no}.` : `Now tap the middle of the green.`;
+      if (pts.t && pts.g) {
+        const y = Math.round(ydDist(pts.t, pts.g) * M2Y);
+        yds.innerHTML = `Tee to green: <b>${y} yds</b>${y < 40 || y > 700 ? ` <span class="warnt">That looks off. Check the spots.</span>` : ""} <span class="muted">Drag either pin to adjust.</span>`;
+      } else yds.textContent = "";
+      sv.disabled = !(pts.t && pts.g) || !(moved.t || moved.g);
+    };
+    sync();
+    map.on("click", e => {
+      pts[mode] = [e.latlng.lat, e.latlng.lng]; moved[mode] = true;
+      if (mode === "t" && !pts.g) mode = "g";
+      sync();
+    });
+    m.querySelector(".pinmodes").onclick = e => { const b = e.target.closest("[data-pm]"); if (b) { mode = b.dataset.pm; sync(); } };
+    $("#pingps", m).onclick = () => {
+      if (!("geolocation" in navigator)) return toast("GPS not supported on this device");
+      toast("Getting your spot…");
+      navigator.geolocation.getCurrentPosition(p => {
+        pts.t = [p.coords.latitude, p.coords.longitude]; moved.t = true; mode = pts.g ? "t" : "g";
+        map.setView(pts.t, Math.max(map.getZoom(), 17)); sync();
+        if (p.coords.accuracy > 15) toast(`GPS is within about ${Math.round(p.coords.accuracy * M2Y)} yds. Drag the tee pin if it's off.`);
+      }, e => toast(e.code === 1 ? "Location blocked. Allow it in Safari Settings." : "Could not get GPS. Try again."), { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+    };
+    // Only save what was tapped (or is already saved), so a good map green keeps its real shape.
+    const keep = (k, lat, lng) => moved[k] ? pts[k] : pin?.[lat] != null ? [pin[lat], pin[lng]] : (k === "t" ? bh?.t : bh?.g?.length) ? null : pts[k];
+    const done = async (row, msg) => {
+      const list = state.hole_pins ||= [];
+      const i = list.findIndex(p => p.course_name === course && p.hole === no);
+      if (i >= 0) list.splice(i, 1);
+      if (row) list.push({ course_name: course, hole: no, ...row });
+      satBases.clear(); yd.fixKey = "";
+      closeModal(); render(); ydPaint(); toast(msg);
+    };
+    sv.onclick = async () => {
+      const t = keep("t", "tee_lat", "tee_lng"), g = keep("g", "green_lat", "green_lng");
+      const row = { tee_lat: t?.[0] ?? null, tee_lng: t?.[1] ?? null, green_lat: g?.[0] ?? null, green_lng: g?.[1] ?? null };
+      sv.disabled = true; sv.textContent = "Saving…";
+      try {
+        if (!DEMO) await rpc("gt_pin", { course, hole_no: no, tlat: row.tee_lat, tlng: row.tee_lng, glat: row.green_lat, glng: row.green_lng });
+        await done(t || g ? row : null, `Hole ${no} saved. Everyone sees it now.`);
+      } catch (err) { sv.disabled = false; sv.textContent = `Save hole ${no}`; toast("Couldn't save: " + errMsg(err)); }
+    };
+    const rs = $("#pinreset", m);
+    if (rs) rs.onclick = async () => {
+      try { if (!DEMO) await rpc("gt_pin", { course, hole_no: no, tlat: null, tlng: null, glat: null, glng: null }); await done(null, `Hole ${no} is back to the map's spots.`); }
+      catch (err) { toast("Couldn't reset: " + errMsg(err)); }
+    };
+  });
+}
 function satPaint() {
   document.querySelectorAll("[data-sat]").forEach(async wrap => {
     const [id, hIdx] = wrap.dataset.sat.split(":");
     const hole = +hIdx, card = cardById(id);
     if (!card) return;
-    const holes = ydGreens(card), h = holes?.[hole + 1] || holes?.[String(hole + 1)];
-    if (!h?.t || !h?.g?.length) { wrap.hidden = true; return; }
+    const h = ydHole(card, hole), me = wrap.parentNode?.querySelector(`[data-mapme="${id}:${hole}"]`);
+    if (me) me.hidden = !!h || !ydDone(card);
+    if (!h) { wrap.hidden = true; return; }
     wrap.hidden = false;
     const cv = $(".satcv", wrap), clr = $(".satclr", wrap), exp = $(".satexp", wrap), hint = $(".sathint", wrap);
     const key = id + ":" + hole;

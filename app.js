@@ -1880,7 +1880,7 @@ function viewCard(id) {
         <button type="button" class="satbtn satexp" aria-label="Expand hole map">⤢</button>
       </div>
       <div class="hnote" data-hnote="${id}:${hole}">${ydHoleNote(card, hole)}</div>
-      <div class="hfoot"><span><span id="savestate" class="savestate"></span><span id="autoadv" class="autoadv"></span></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Submit round</button>`}</div>
+      <div class="hfoot"><span><span id="savestate" class="savestate"></span><span id="autoadv" class="autoadv">${cardAction._advFor === id + ":" + hole ? `Hole ${hole + 2} next…` : ""}</span></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Submit round</button>`}</div>
       <p class="hint">Tap the number for par, − and + for anything else. Once everyone has a score it moves to the next hole.</p>
     </section>` : `<p class="hint center">Updates by itself. Tap Enter scores to keep score.</p>`;
 
@@ -1913,27 +1913,44 @@ function firstOpenHole(card) {
   return n - 1;
 }
 
+const ADV_MS = 1600, HOLE_SETTLE_MS = 450;
+function goHole(id, h) {
+  clearTimeout(cardAction._adv); cardAction._advFor = null; cardAction._moved = Date.now();
+  localStorage.setItem("golf_hole_" + id, h); render();
+}
 function cardAction(act, b) {
   if (act === "theme") { $("#themebtn")?.click(); render(); return; }
   const id = state.cardId; const card = cardById(id); if (!card) return;
-  if (act === "hole") { clearTimeout(cardAction._adv); localStorage.setItem("golf_hole_" + id, b.dataset.v); render(); return; }
+  // Right after the hole changes (a tap or the auto-advance), ignore taps for a moment so quick
+  // taps meant for the old hole don't land on the new one or skip a hole.
+  if ((act === "hole" || act === "sc") && Date.now() - (cardAction._moved || 0) < HOLE_SETTLE_MS) return;
+  if (act === "hole") { goHole(id, Number(b.dataset.v)); return; }
   if (!editing()) return phraseForm();
   if (act === "sc") {
     const s = b.dataset.s, d = Number(b.dataset.d);
     const hole = Number(localStorage.getItem("golf_hole_" + id) ?? firstOpenHole(card));
+    // Pin the hole being scored. Without this, a phone that never stored a hole (card started on
+    // another phone) follows "first open hole" and jumps the instant the last score goes in.
+    localStorage.setItem("golf_hole_" + id, hole);
+    const key = id + ":" + hole;
+    const allIn = () => card.players.every(p => holeVals(card, p)[hole] != null);
+    const wasIn = allIn(), armed = cardAction._advFor === key;
     const arr = holeVals(card, s); const par = card.pars[hole];
     let v = arr[hole];
     if (d === 0) v = v == null ? par : v; else v = Math.min(15, Math.max(1, (v ?? par) + d));
     arr[hole] = v; card.scores = { ...card.scores, [s]: arr };
     clearTimeout(cardAction._adv);
+    // Auto-advance only when this tap fills the last empty score on the hole (or one is already
+    // counting down, and this tap restarts it). Fixing a hole that was already complete stays put.
+    cardAction._advFor = hole < card.pars.length - 1 && allIn() && (!wasIn || armed) ? key : null;
     render(); queueSave(card, s);
-    // Everyone has a score on this hole: move on after a short pause (any tap cancels or restarts it).
-    if (hole < card.pars.length - 1 && card.players.every(p => holeVals(card, p)[hole] != null)) {
-      const note = $("#autoadv"); if (note) note.textContent = `Hole ${hole + 2} next…`;
+    if (cardAction._advFor === key) {
       cardAction._adv = setTimeout(() => {
+        if (cardAction._advFor !== key) return;
+        cardAction._advFor = null;
         if (state.tab !== "card" || state.cardId !== id || Number(localStorage.getItem("golf_hole_" + id) ?? hole) !== hole) return;
-        localStorage.setItem("golf_hole_" + id, hole + 1); render();
-      }, 1600);
+        goHole(id, hole + 1);
+      }, ADV_MS);
     }
   }
   if (act === "par") {

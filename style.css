@@ -822,7 +822,11 @@ body[data-tab="card"] .endbtn { padding: 9px; }
 .stbl td.mx-dn { color: var(--text-2); }
 
 /* Live card tabs while scoring (Nov 26): Game, Scorecard, Bets */
-.ctabs { display: flex; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 0 0 8px; }
-.ctabs button { flex: 1; border: 0; border-radius: 0; padding: 8px 0; font-size: 14px; }
-.ctabs button + button { border-left: 1px solid var(--line); }
-.ctabs button.on { background: var(--accent); color: var(--on-accent); font-weight: 700; }
+/* Same look as the main page tabs (.tabs a): plain text, gold underline on the open one. */
+.ctabs { display: flex; gap: 4px; margin: 0 0 8px; }
+.ctabs button {
+  flex: 1; background: none; border: 0; border-bottom: 3px solid transparent; border-radius: 0; box-shadow: none;
+  padding: 9px 12px 10px; color: var(--text-2); font-weight: 600; font-size: 14px; white-space: nowrap;
+}
+.ctabs button.on { background: none; color: var(--text); border-bottom-color: var(--gold); }
+@media (max-width: 480px) { .ctabs { gap: 0; } .ctabs button { padding: 9px 7px 10px; font-size: 13.5px; } }

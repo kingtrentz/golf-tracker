@@ -856,3 +856,10 @@ body[data-tab="card"] .endbtn { padding: 9px; }
 
 /* Start a scorecard: Match / Individual rows. Labels set their own display, so hidden needs this. */
 .kmatch[hidden], .ksolo[hidden] { display: none; }
+/* Tap-to-map: other holes and map data shown under the pins */
+.pinno { display: flex !important; align-items: center; justify-content: center; border-radius: 999px; font-weight: 800; font-size: 11px; pointer-events: none; }
+.pinno.on { background: #bfa478; color: #150c17; box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+.pinno.off { background: rgba(20,26,21,.75); color: #d9d2c3; border: 1px solid #d9d2c3; font-size: 10px; width: 18px !important; height: 18px !important; margin: -9px 0 0 -9px !important; }
+.pinkey { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.pinkey span::before { content: ""; display: inline-block; width: 14px; height: 0; margin-right: 6px; vertical-align: middle; border-top: 2px solid #bfa478; }
+.pinkey .k-o::before { border-top: 2px dashed #d9d2c3; }

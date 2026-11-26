@@ -1879,13 +1879,13 @@ function viewCard(id) {
       <span class="lname">${dot(x.s)}${esc(pname(x.s))}${chip(x.s)}</span>
       <span class="lscore">${x.t.thru ? `<b>${fmtToPar(x.t.toPar)}</b><small>${x.t.gross}</small>` : `<span class="muted">–</span>`}</span>
       <span class="lpts">${x.t.thru ? (sk ? `<b>${x.sk}</b><small>skin${x.sk === 1 ? "" : "s"}</small>` : `<b>${x.p.pts}</b><small>pts</small>`) : ""}</span></div>`).join("")}</div>`;
-  const mlines = st.pairs.length > 1 ? `<div class="mlines">${st.pairs.map(pr => `<span>${esc(pname(pr.a))} v ${esc(pname(pr.b))}: <b>${esc(pr.text.replace(/ thru \d+$/, ""))}</b></span>`).join("")}</div>` : "";
+  // One short row per pairing: names left, standing right ("–" until the pair has played a hole).
+  const mlines = st.pairs.length > 1 ? `<div class="mlines">${st.pairs.map(pr => `<div class="mp"><span class="mpn">${esc(pname(pr.a))} v ${esc(pname(pr.b))}</span>${pr.thru ? `<b>${esc(pr.text.replace(/ thru \d+$/, ""))}</b>` : `<span class="muted">–</span>`}</div>`).join("")}</div>` : "";
   const hcpline = `<div class="hcpline">${card.players.filter(p => pops[p].some(x => x > 0)).map(p => `${esc(pname(p))} strokes on ${pops[p].map((x, i) => x > 0 ? i + 1 + (x > 1 ? "×" + x : "") : null).filter(Boolean).join(", ")}`).join(" · ") || (card.players.length > 1 ? "Playing level, no strokes" : "")}${board.some(x => x.ch != null) ? ` · course hcp ${board.map(x => `${esc(pname(x.s))} ${x.ch ?? "–"}`).join(", ")}` : ""}</div>`;
   const rateWarn = !card.rating || !card.slope ? `<div class="warnt small">Add the course rating and slope (End round) so handicap strokes count.</div>` : "";
   const noSis = card.sis?.length === n ? "" : `<div class="muted small">No hole handicaps saved for this course, so strokes use the standard order. <button class="link ed" data-act="cardsc" data-id="${id}">Edit scorecard</button></div>`;
-  // Scoring: a short status on top so the hole entry (all players' buttons) fits on one phone screen.
-  const status = `<section class="card live-top">${chips}${meta}<div class="headline">${esc(st.head)}</div>${mlines}${rateWarn}</section>`;
-  const lead = `<section class="card lbcard">${latest}${lboard}<details class="strokesd" ${viewCard._strokes ? "open" : ""}><summary class="muted small">Strokes</summary>${hcpline}${noSis}</details></section>`;
+  // Scoring: the hole (header, map, everyone's buttons) comes first; the match standings sit under it in one box.
+  const standings = `<section class="card live-top lbcard">${chips}${meta}<div class="headline">${esc(st.head)}</div>${mlines}${rateWarn}${latest}${lboard}<details class="strokesd" ${viewCard._strokes ? "open" : ""}><summary class="muted small">Strokes</summary>${hcpline}${noSis}</details></section>`;
   const top = `<section class="card live-top">
     ${chips}
     ${meta}
@@ -1906,6 +1906,13 @@ function viewCard(id) {
           <div class="popline">${wins[hole] !== undefined ? (wins[hole] ? `<span class="hwin">${esc(pname(wins[hole]))} wins the hole</span>` : `<span class="hhalf">Hole halved</span>`) : ""}${(() => { if (wins[hole] !== undefined) return ""; const g = card.players.filter(p => pops[p][hole] > 0); return card.players.length < 2 ? "" : g.length ? `${g.map(p => esc(pname(p))).join(" & ")} ${g.length > 1 ? "stroke" : "strokes"} here` : "No strokes here"; })()}</div></div>
         <button class="nav" data-act="hole" data-v="${hole + 1}" ${hole === n - 1 ? "disabled" : ""} aria-label="Next hole">›</button>
       </div>
+      <div class="satwrap" data-sat="${id}:${hole}" hidden>
+        <canvas class="satcv"></canvas>
+        <span class="sathint">Drag to measure</span>
+        <button type="button" class="satbtn satclr" aria-label="Clear target" hidden>✕</button>
+        <button type="button" class="satbtn satexp" aria-label="Expand hole map">⤢</button>
+      </div>
+      <div class="hnote" data-hnote="${id}:${hole}">${ydHoleNote(card, hole)}</div>
       ${card.players.map(s => {
         const v = holeVals(card, s)[hole];
         const pop = pops[s][hole]; const hp = st.pts[s].per[hole];
@@ -1916,13 +1923,6 @@ function viewCard(id) {
           <button class="step" data-act="sc" data-s="${s}" data-d="1" aria-label="${esc(pname(s))} one more">+</button>
         </div>`;
       }).join("")}
-      <div class="satwrap" data-sat="${id}:${hole}" hidden>
-        <canvas class="satcv"></canvas>
-        <span class="sathint">Drag to measure</span>
-        <button type="button" class="satbtn satclr" aria-label="Clear target" hidden>✕</button>
-        <button type="button" class="satbtn satexp" aria-label="Expand hole map">⤢</button>
-      </div>
-      <div class="hnote" data-hnote="${id}:${hole}">${ydHoleNote(card, hole)}</div>
       <div class="hfoot"><span><span id="savestate" class="savestate"></span><span id="autoadv" class="autoadv">${cardAction._advFor === id + ":" + hole ? `Hole ${hole + 2} next…` : ""}</span></span>${hole < n - 1 ? `<button class="primary" data-act="hole" data-v="${hole + 1}">Next hole ›</button>` : `<button class="primary" data-act="finish" data-id="${id}">Submit round</button>`}</div>
       <p class="hint">Tap the number for par, − and + for anything else. Once everyone has a score it moves to the next hole.</p>
     </section>` : `<p class="hint center">Updates by itself. Tap Enter scores to keep score.</p>`;
@@ -1944,7 +1944,7 @@ function viewCard(id) {
     ${hl.length > 6 ? `<details><summary class="muted small">Show all ${hl.length}</summary><div class="moments">${hl.slice(6).map(m => `<div class="mom ${m.kind}"><span class="mh2">${m.i < n ? m.i + 1 : "F"}</span>${esc(m.text)}</div>`).join("")}</div></details>` : ""}</section>` : "";
 
   const endBtn = ed ? `<div class="endwrap"><button class="endbtn" data-act="finish" data-id="${id}">${card.players.every(p => cardTotals(card, p).done) ? "Submit round" : "End round"}</button></div>` : "";
-  return `${ed ? status + entry + endBtn + lead : top + entry + endBtn}${betsBox(card)}${highlights}
+  return `${ed ? entry + standings + endBtn : top + entry + endBtn}${betsBox(card)}${highlights}
   <section class="card"><h3>Scorecard</h3>${grid(0)}${grid(1)}
     <div class="legend2"><span><i class="sc-b"></i>birdie or better</span><span><i class="sc-o"></i>bogey or worse</span><span><i class="popk"></i>stroke hole</span><span>small number by a name = course handicap</span><span><i class="wonk"></i>won the hole</span></div></section>
   <div class="ed acts center"><button class="link" data-act="cardsc" data-id="${id}">Edit scorecard</button><button class="link" data-act="card-del" data-id="${id}">Delete scorecard</button></div>`;

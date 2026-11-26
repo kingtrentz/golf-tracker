@@ -402,8 +402,10 @@ h3.inl { display: inline; }
 .mchip { font-size: 11px; font-weight: 800; padding: 2px 7px; border-radius: 99px; margin-left: 8px; letter-spacing: .3px; }
 .mchip.up { background: var(--gold-bg); color: var(--gold); border: 1px solid var(--gold-line); }
 .mchip.as { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--line); }
-.mlines { display: grid; gap: 3px; margin-top: 8px; font-size: 13.5px; color: var(--text-2); }
-.mlines b { color: var(--text); }
+.mlines { display: grid; gap: 2px; margin: 8px 0 2px; font-size: 13px; color: var(--text-2); }
+.mlines .mp { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.mlines .mpn { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mlines b { color: var(--text); white-space: nowrap; }
 .hcpline { color: var(--muted); font-size: 12px; margin-top: 10px; }
 .cardsw { margin-bottom: 10px; }
 .cardsw .chip { text-decoration: none; color: var(--text-2); background: var(--surface-2); border: 1px solid var(--line); }
@@ -496,9 +498,8 @@ button.primary.big { width: 100%; padding: 14px; font-size: 17px; }
 .phprev { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; margin-bottom: 10px; }
 .phprev img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 5px; }
 /* Live card while scoring: leaderboard in its own box, strokes tucked away */
-.lbcard .latest { margin: 0 0 6px; }
-.lbcard .lboard { margin-top: 0; }
-.lbcard .lrow:first-child { border-top: 0; padding-top: 2px; }
+.lbcard .latest { margin: 8px 0 0; }
+.lbcard .lboard { margin-top: 8px; }
 .strokesd { margin-top: 8px; }
 .strokesd summary { padding: 4px 0; }
 .strokesd[open] summary { color: var(--text-2); }

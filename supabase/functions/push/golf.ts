@@ -54,6 +54,18 @@ function groupPops(chs: Record<string, number | null>, pars: number[], sis?: num
   return Object.fromEntries(Object.entries(chs).map(([s, ch]) => [s, pars.map((_, i) => vals.length > 1 ? strokesOn((ch ?? 0) - low, si[i], n) : 0)]));
 }
 
+// Guests (app.js: cardGuests). card.scores.__meta.guests = { "g_<id>": { name, hcp, money } }.
+// Every guest plays the game on the card, so alerts use the guest's name and typed handicap.
+// Guest rounds never feed anyone's handicap.
+export function guestView(card: Card, w: World): { card: Card; w: World } {
+  const g: Record<string, { name?: string; hcp?: number | null; money?: boolean }> = (card.scores as any)?.__meta?.guests || {};
+  const rounds = w.rounds.filter(r => !String(r.player).startsWith("g_"));
+  if (!Object.keys(g).length) return { card, w: { ...w, rounds } };
+  const names = { ...w.names }, start = { ...w.start };
+  for (const [s, x] of Object.entries(g)) { names[s] = x?.name || "Guest"; if (x?.hcp != null) start[s] = Number(x.hcp); }
+  return { card, w: { names, start, rounds } };
+}
+
 export const holeVals = (card: Card, s: string) => { const a = card.scores?.[s] || []; return card.pars.map((_, i) => a[i] ?? null); };
 export function cardTotals(card: Card, s: string) {
   const v = holeVals(card, s); let gross = 0, par = 0, thru = 0;

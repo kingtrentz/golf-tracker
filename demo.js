@@ -38,5 +38,6 @@ window.GOLF_DEMO = (function () {
   matches.push({ id: "m-up2", scheduled_for: "2026-12-12", tee_time: "", course_id: "c1", course_name: "Sample Links",
     tee_name: "White", rating: 70.1, slope: 124, par: 72, players: ["trent", "logan"], status: "scheduled",
     scoring: "gross", title_match: false, notes: "" });
-  return { courses, rounds, matches };
+  const guests = [{ id: "demo-g1", first_name: "Sam", last_name: "Sample", handicap: 14.2 }];
+  return { courses, rounds, matches, guests };
 })();

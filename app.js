@@ -10,7 +10,7 @@ const DEMO = !CFG.supabaseUrl || !CFG.supabaseAnonKey;
 const OGAPI = "https://api.opengolfapi.org";
 
 let sb = null;
-const state = { rounds: [], matches: [], courses: [], cards: [], start: {}, phrase: localStorage.getItem("golf_phrase"), tab: null, cardId: null };
+const state = { rounds: [], guestRounds: [], guests: [], matches: [], courses: [], cards: [], start: {}, phrase: localStorage.getItem("golf_phrase"), tab: null, cardId: null };
 
 // ---------- helpers ----------
 const $ = (s, el = document) => el.querySelector(s);
@@ -25,8 +25,21 @@ const today = () => { const d = new Date(); return new Date(d.getTime() - d.getT
 const daysBetween = (a, b) => Math.round((parseDate(b) - parseDate(a)) / 864e5);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
 const byDate = (a, b) => (a.played_on || a.scheduled_for).localeCompare(b.played_on || b.scheduled_for) || String(a.created_at || "").localeCompare(String(b.created_at || ""));
-const dot = slug => `<span class="dot" style="background:${P[slug]?.color || "#888"}"></span>`;
-const pname = slug => P[slug]?.name || slug;
+// Guests: saved in the "guests" table, on a card as "g_" + their id. They score on the live card and show
+// on scorecards, but stay out of head to head, Master Champ, handicaps and money totals.
+const isGuest = s => typeof s === "string" && s.startsWith("g_");
+const GUESTS = {}; // slug -> { name, hcp }
+const GUEST_COLOR = "#8a8f98";
+const guestName = g => [g.first_name, g.last_name].filter(Boolean).join(" ");
+const noteGuests = map => { for (const [s, g] of Object.entries(map || {})) if (isGuest(s) && g?.name) GUESTS[s] = { ...GUESTS[s], ...g }; };
+const pcolor = slug => P[slug]?.color || GUEST_COLOR;
+const dot = slug => `<span class="dot${isGuest(slug) ? " gdot" : ""}" style="background:${pcolor(slug)}"></span>`;
+const pname = slug => P[slug]?.name || GUESTS[slug]?.name || (isGuest(slug) ? "Guest" : slug);
+// Guests on a card: card.scores.__meta.guests = { slug: { name, hcp, money } }. Every guest plays the
+// game on the card (strokes, holes, skins); only guests with "In the money" ticked are in the bets.
+const cardGuests = card => card?.scores?.__meta?.guests || {};
+const inMoney = (card, s) => !isGuest(s) || !!cardGuests(card)[s]?.money;
+const bettors = card => card.players.filter(s => inMoney(card, s));
 
 // ---------- handicap math (USGA Rules of Handicapping 5.1 / 5.2) ----------
 const diffOf = r => r1((113 / r.slope) * (r.score - r.rating));
@@ -52,7 +65,9 @@ function effIndex(rounds, slug) {
   return { index: idx == null ? null : r1(idx), count: elig.length, starting: elig.length === 0 && start != null, last: last == null ? null : r1(last), after, start };
 }
 const playerRounds = slug => state.rounds.filter(r => r.player === slug).sort(byDate);
-const currentIndex = slug => effIndex(playerRounds(slug), slug);
+const currentIndex = slug => isGuest(slug)
+  ? { index: GUESTS[slug]?.hcp ?? null, count: 0, starting: false, last: null, after: {}, start: null }
+  : effIndex(playerRounds(slug), slug);
 const courseHcp = (idx, c) => idx == null ? null : Math.round(idx * (c.slope / 113) + (c.rating - c.par));
 
 function indexHistory(slug) {
@@ -232,29 +247,46 @@ function championship() {
 // the family security phrase on the server, so the phrase is never in this code.
 async function loadData() {
   if (DEMO) {
-    if (state._demoLoaded) return;
+    if (state._demoLoaded) { splitGuests(); return; }
     state._demoLoaded = true;
     const d = JSON.parse(JSON.stringify(window.GOLF_DEMO));
     Object.assign(state, d);
     state.cards = state.cards || [];
+    state.guests = state.guests || [];
+    splitGuests();
     stampUpd();
     return;
   }
-  const [r, m, c, pl, cd] = await Promise.all([
+  const [r, m, c, pl, cd, gs] = await Promise.all([
     sb.from("rounds").select("*").order("played_on"),
     sb.from("matches").select("*").order("scheduled_for"),
     sb.from("courses").select("*").order("name"),
     sb.from("players").select("*"),
     sb.from("cards").select("*").eq("status", "live").order("created_at"),
+    sb.from("guests").select("*"),
     loadPhotos().catch(() => {})
   ]);
   for (const x of [r, m, c]) if (x.error) throw x.error;
   state.start = Object.fromEntries((pl.data || []).filter(x => x.starting_index != null).map(x => [x.slug, Number(x.starting_index)]));
+  state.guestRounds = [];
   state.rounds = r.data.map(x => ({ ...x, rating: Number(x.rating), slope: Number(x.slope), par: Number(x.par) }));
   state.matches = m.data.map(x => ({ ...x, rating: x.rating == null ? null : Number(x.rating), slope: x.slope == null ? null : Number(x.slope), par: x.par == null ? null : Number(x.par) }));
   state.courses = c.data.map(x => ({ ...x, rating: Number(x.rating), slope: Number(x.slope), par: Number(x.par) }));
   state.cards = (cd.data || []).map(x => ({ ...x, rating: x.rating == null ? null : Number(x.rating) }));
+  state.guests = gs.error ? [] : (gs.data || []).map(x => ({ ...x, handicap: x.handicap == null ? null : Number(x.handicap) }));
+  splitGuests();
   stampUpd();
+}
+// Guest rounds live in the same table (player "g_<id>") but never count in stats: keep them apart.
+// Names come from the saved guest, else the name saved with the card, round or money result.
+function splitGuests() {
+  const all = [...state.rounds, ...state.guestRounds];
+  state.rounds = all.filter(r => !isGuest(r.player));
+  state.guestRounds = all.filter(r => isGuest(r.player));
+  for (const r of state.guestRounds) { const m = /^Guest: (.+)$/.exec(r.notes || ""); if (m && !GUESTS[r.player]) GUESTS[r.player] = { name: m[1] }; }
+  for (const m of state.matches) noteGuests(m.bets?.result?.guests);
+  for (const c of state.cards) noteGuests(cardGuests(c));
+  for (const g of state.guests) GUESTS["g_" + g.id] = { name: guestName(g), hcp: g.handicap };
 }
 
 async function rpc(fn, args) {
@@ -588,7 +620,7 @@ function viewH2H() {
   ${calc}
   <section class="card"><h3>Results</h3>${pastRows || `<div class="empty">No results yet.</div>`}</section>
   ${roundScorecardsSection()}
-  ${scorecardsSection()}`;
+  ${guestsSection()}`;
 }
 
 // ---------- gallery ----------
@@ -1292,7 +1324,8 @@ const cardGame = card => card?.scores?.__meta?.game || (card?.scoring === "gross
 const cardCh = (card, s) => {
   const ov = card?.scores?.__meta?.hcp?.[s];
   if (ov != null && ov !== "" && !isNaN(Number(ov))) return Number(ov);
-  return roundCh(currentIndex(s).index, { rating: card.rating, slope: card.slope, par: card.par || card.pars.reduce((a, b) => a + b, 0) }, card.pars.length);
+  const gh = isGuest(s) ? cardGuests(card)[s]?.hcp : undefined;
+  return roundCh(gh != null ? Number(gh) : currentIndex(s).index, { rating: card.rating, slope: card.slope, par: card.par || card.pars.reduce((a, b) => a + b, 0) }, card.pars.length);
 };
 const cardPts = (card, s) => stableford(holeVals(card, s), card.pars, card.sis, null, matchPops(card)[s]);
 // Match strokes ("pops"): strokes off the lowest handicap in the group, on the hardest holes (none in gross stroke play).
@@ -1361,10 +1394,10 @@ function betLeg(card, pops, a, b, from, to) {
 }
 function settleBets(card) {
   const b = card.bets;
-  if (!b || card.players.length < 2) return null;
+  if (!b || bettors(card).length < 2) return null;
   const n = card.pars.length, pops = matchPops(card);
   const segs = n === 18 ? ["front", "back", "game"] : ["game"];
-  const pairs = pairsOf(card.players).map(([a, c]) => {
+  const pairs = pairsOf(bettors(card)).map(([a, c]) => {
     const legs = segs.filter(k => +b[k] > 0).map(k => { const [f, t] = segRange(k, n);
       return { k, label: n === 9 ? "9 holes" : SEG_NAME[k], amt: +b[k], ...betLeg(card, pops, a, c, f, t) }; });
     (b.presses || []).forEach((p, pi) => {
@@ -1376,7 +1409,7 @@ function settleBets(card) {
     legs.forEach(l => { if (l.winner) bal += l.winner === a ? l.amt : -l.amt; });
     return { a, b: c, legs, bal };
   });
-  const net = Object.fromEntries(card.players.map(s => [s, 0])), pays = [];
+  const net = Object.fromEntries(bettors(card).map(s => [s, 0])), pays = [];
   pairs.forEach(p => {
     if (!p.bal) return;
     const to = p.bal > 0 ? p.a : p.b, from = to === p.a ? p.b : p.a, amt = Math.abs(p.bal);
@@ -1388,12 +1421,12 @@ const stakesText = (b, n) => (n === 18 ? [b.front, b.back, b.game] : [b.game]).m
 const paysText = (pays, past) => pays.map(x => `${esc(pname(x.from))} ${past ? "paid" : "pays"} ${esc(pname(x.to))} <b>${money(x.amt)}</b>`).join("<br>");
 function betsBox(card) {
   const r = settleBets(card), ed = editing();
-  if (!r) return card.players.length > 1 && ed ? `<div class="ed acts center"><button class="link" data-act="bets" data-id="${card.id}">Add bets</button></div>` : "";
+  if (!r) return bettors(card).length > 1 && ed ? `<div class="ed acts center"><button class="link" data-act="bets" data-id="${card.id}">Add bets</button></div>` : "";
   const n = card.pars.length;
   return `<section class="card bets"><h3>Bets <span class="muted small">${stakesText(card.bets, n)}</span></h3>
     ${r.pairs.map(p => `${r.pairs.length > 1 ? `<div class="bpair">${dot(p.a)}${esc(pname(p.a))} v ${dot(p.b)}${esc(pname(p.b))}</div>` : ""}
       ${p.legs.map(l => `<div class="brow ${l.done ? "fin" : ""}"><span>${esc(l.label)}${l.sub ? ` <small>${esc(l.sub)}</small>` : ""} <small>${money(l.amt)}</small>${l.k === "press" && ed ? ` <button class="link xs" data-act="unpress" data-id="${card.id}" data-v="${l.pi}" aria-label="Remove press">✕</button>` : ""}</span>
-        <b style="${l.lead ? `color:${P[l.lead].color}` : ""}">${esc(l.text)}</b></div>`).join("")}`).join("")}
+        <b style="${l.lead ? `color:${pcolor(l.lead)}` : ""}">${esc(l.text)}</b></div>`).join("")}`).join("")}
     <div class="bsum">${r.pays.length ? paysText(r.pays) + (r.done ? "" : ` <span class="muted">so far</span>`) : r.done ? "All square, nobody pays." : "Nobody owes anything yet."}</div>
     ${ed ? `<div class="acts"><button data-act="press" data-id="${card.id}">Press</button><button class="link" data-act="bets" data-id="${card.id}">Change bets</button></div>` : ""}
   </section>`;
@@ -1437,7 +1470,7 @@ function betsForm(id) {
   const card = cardById(id); if (!card) return;
   if (!editing()) return phraseForm(() => betsForm(id));
   const n = card.pars.length;
-  openModal(`<h2>Bets</h2><p class="hint">${card.players.map(pname).map(esc).join(" vs ")}</p>
+  openModal(`<h2>Bets</h2><p class="hint">${bettors(card).map(pname).map(esc).join(" vs ")}</p>
     <form id="bf">${betFields(card.bets ?? (card.bets === null ? BET_DEFAULT : null), n)}
     <div class="acts"><button class="primary" type="submit">Save bets</button></div></form>`, m => {
     const f = $("#bf", m); wireBets(f, n);
@@ -1454,7 +1487,7 @@ function pressForm(id) {
   const n = card.pars.length, pops = matchPops(card);
   const hole = Math.min(n - 1, Number(localStorage.getItem("golf_hole_" + id) ?? firstOpenHole(card)));
   const segs = n === 18 ? (hole < 9 ? ["front", "game"] : ["back", "game"]) : ["game"];
-  const pairs = pairsOf(card.players);
+  const pairs = pairsOf(bettors(card));
   const amtFor = seg => +card.bets[seg] || +card.bets.game || BET_DEFAULT[seg];
   openModal(`<h2>Press</h2><p class="hint">A new bet from the hole you pick to the end of that nine (or the game).</p>
     <form id="pf">
@@ -1566,7 +1599,9 @@ function confirmCard(m, step1, d, go) {
   const n = pars.length, wrap = document.createElement("div");
   // Pre-match course handicap overrides (editable right here before confirming the holes).
   const baseCard0 = { pars, sis, players: d.players, rating: d.rating, slope: d.slope, par: d.par || pars.reduce((a, b) => a + b, 0) };
-  const hcpOv = Object.fromEntries(d.players.map(s => [s, roundCh(currentIndex(s).index, baseCard0, n)]));
+  const G = d.players;
+  const idxOf = s => isGuest(s) ? (d.guests?.[s]?.hcp ?? null) : currentIndex(s).index;
+  const hcpOv = Object.fromEntries(d.players.map(s => [s, roundCh(idxOf(s), baseCard0, n)]));
   const origHcp = { ...hcpOv };
   wrap.className = "confirm"; step1.hidden = true; step1.after(wrap);
   const back = () => { wrap.remove(); step1.hidden = false; };
@@ -1574,14 +1609,14 @@ function confirmCard(m, step1, d, go) {
     const cleanOv = {};
     for (const s of d.players) if (hcpOv[s] != null && hcpOv[s] !== "" && !isNaN(Number(hcpOv[s]))) cleanOv[s] = Number(hcpOv[s]);
     const card = { pars, sis, players: d.players, rating: d.rating, slope: d.slope, par: d.par || pars.reduce((a, b) => a + b, 0),
-      scoring: dbScoring(gm), scores: { __meta: { game: gm, hcp: cleanOv } } };
+      scoring: dbScoring(gm), scores: { __meta: { game: gm, hcp: cleanOv, guests: d.guests || {} } } };
     const pops = matchPops(card), si = strokeIndex(pars, sis);
-    const rows = d.players.map(s => ({ s, h: currentIndex(s), ch: cardCh(card, s), got: pops[s].reduce((a, b) => a + b, 0) }));
+    const rows = d.players.map(s => ({ s, h: { index: idxOf(s) }, ch: cardCh(card, s), got: pops[s].reduce((a, b) => a + b, 0) }));
     const half = (a, b, lbl) => { const idx = [...Array(b - a).keys()].map(k => a + k);
       return `<table class="sc chk"><thead><tr><th>${lbl}</th>${idx.map(i => `<th>${i + 1}</th>`).join("")}<th>Tot</th></tr></thead><tbody>
         <tr class="par"><td>Par</td>${idx.map(i => `<td>${pars[i]}</td>`).join("")}<td>${idx.reduce((x, i) => x + pars[i], 0)}</td></tr>
         <tr class="hcp"><td>Hcp</td>${idx.map(i => `<td>${si[i]}</td>`).join("")}<td></td></tr>
-        ${d.players.length > 1 && !isGross ? d.players.map(s => `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}</td>${idx.map(i => `<td>${pops[s][i] > 0 ? `<i class="pd">${"●".repeat(pops[s][i])}</i>` : ""}</td>`).join("")}<td>${idx.reduce((x, i) => x + Math.max(0, pops[s][i]), 0) || ""}</td></tr>`).join("") : ""}
+        ${G.length > 1 && !isGross ? G.map(s => `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}</td>${idx.map(i => `<td>${pops[s][i] > 0 ? `<i class="pd">${"●".repeat(pops[s][i])}</i>` : ""}</td>`).join("")}<td>${idx.reduce((x, i) => x + Math.max(0, pops[s][i]), 0) || ""}</td></tr>`).join("") : ""}
       </tbody></table>`; };
     const editor = (a, b, lbl) => `<div class="sgrp"><div class="sr head"><span>${lbl}</span><span>Par</span><span>Hcp</span></div>${[...Array(b - a).keys()].map(k => { const i = a + k;
       return `<div class="sr"><span class="sh">${i + 1}</span><div class="seg">${[3, 4, 5, 6].map(p => `<button type="button" class="${pars[i] === p ? "on" : ""}" data-h="${i}" data-p="${p}">${p}</button>`).join("")}</div>
@@ -1590,10 +1625,10 @@ function confirmCard(m, step1, d, go) {
     const gmLbl = SCORING_LABEL[gm] || gm;
     wrap.innerHTML = `<h2>Check the scorecard</h2>
       <p class="hint">${esc(d.course_name)}${d.tee_name ? " · " + esc(d.tee_name) : ""}${d.rating ? ` · ${d.rating}/${d.slope}` : ""} · ${n} holes · <b>${esc(gmLbl)}</b></p>
-      <table class="t cplayers"><thead><tr><th></th><th class="n">Index</th><th class="n">Course hcp</th>${d.players.length > 1 && !isGross ? `<th class="n">Strokes</th>` : ""}</tr></thead><tbody>
-        ${rows.map(x => `<tr><td>${dot(x.s)}${esc(pname(x.s))}</td><td class="n">${fmtIdx(x.h.index)}</td><td class="n">${isGross ? `<span class="muted">–</span>` : `<input type="number" class="ch-in" data-ch="${x.s}" inputmode="numeric" min="-10" max="54" value="${x.ch ?? ""}" aria-label="${esc(pname(x.s))} course handicap">`}</td>${d.players.length > 1 && !isGross ? `<td class="n"><b>${x.got || "–"}</b></td>` : ""}</tr>`).join("")}
+      <table class="t cplayers"><thead><tr><th></th><th class="n">Index</th><th class="n">Course hcp</th>${G.length > 1 && !isGross ? `<th class="n">Strokes</th>` : ""}</tr></thead><tbody>
+        ${rows.map(x => `<tr><td>${dot(x.s)}${esc(pname(x.s))}</td><td class="n">${fmtIdx(x.h.index)}</td><td class="n">${isGross ? `<span class="muted">–</span>` : `<input type="number" class="ch-in" data-ch="${x.s}" inputmode="numeric" min="-10" max="54" value="${x.ch ?? ""}" aria-label="${esc(pname(x.s))} course handicap">`}</td>${G.length > 1 && !isGross ? `<td class="n"><b>${x.got || "–"}</b></td>` : ""}</tr>`).join("")}
       </tbody></table>
-      <p class="hint">${isGross ? "Gross stroke play: playing straight up, no handicap strokes." : `${d.players.length > 1 ? (rows.some(x => x.got) ? "Strokes come off the lowest handicap in the group, on the hardest holes (● below). " : "Everyone plays level. ") : ""}${n === 9 ? "9 holes: half the course handicap. " : ""}Need to adjust a handicap for today? Edit any Course hcp box above before confirming.`}</p>
+      <p class="hint">${isGross ? "Gross stroke play: playing straight up, no handicap strokes." : `${G.length > 1 ? (rows.some(x => x.got) ? "Strokes come off the lowest handicap in the group, on the hardest holes (● below). " : "Everyone plays level. ") : ""}${n === 9 ? "9 holes: half the course handicap. " : ""}Need to adjust a handicap for today? Edit any Course hcp box above before confirming.`}</p>
       ${flatPars && !editMode ? `<div class="warnt small">No hole pars saved for this course, so every hole shows par 4. Fix them below.</div>` : ""}
       ${noSis && !editMode && !isGross ? `<div class="warnt small">No hole handicaps saved, so strokes use the standard order. Add them below if the card has them.</div>` : ""}
       ${editMode ? `<form id="cfx"><p class="hint">Copy par and handicap (HCP) for each hole from the scorecard.</p>${n === 18 ? editor(0, 9, "Out") + editor(9, 18, "In") : editor(0, n, "Hole")}
@@ -1719,20 +1754,21 @@ async function pullCard(id) {
     if (mine.has("__pars")) data.pars = local.pars;
     Object.assign(local, data);
   } else if (data.status === "live") state.cards.push(data);
+  noteGuests(cardGuests(data));
   stampUpd();
 }
 
 // ---------- the story so far: headline + highlights ----------
 const holeWord = i => `${i + 1}`;
 function cardStory(card) {
-  const n = card.pars.length, P = card.players;
-  const vals = Object.fromEntries(P.map(s => [s, holeVals(card, s)]));
-  const pts = Object.fromEntries(P.map(s => [s, cardPts(card, s)]));
+  const n = card.pars.length, ALL = card.players, P = ALL;
+  const vals = Object.fromEntries(ALL.map(s => [s, holeVals(card, s)]));
+  const pts = Object.fromEntries(ALL.map(s => [s, cardPts(card, s)]));
   const pairs = P.length > 1 ? cardPairs(card) : [];
   const moments = []; // {i, text, kind}
-  const thruAll = Math.max(0, ...P.map(s => cardTotals(card, s).thru));
+  const thruAll = Math.max(0, ...ALL.map(s => cardTotals(card, s).thru));
   // Player moments
-  for (const s of P) {
+  for (const s of ALL) {
     let parRun = 0;
     vals[s].forEach((v, i) => {
       if (v == null) { parRun = 0; return; }
@@ -1823,7 +1859,7 @@ function viewCard(id) {
   const two = gm === "match" && st.pairs.length === 1 ? st.pairs[0] : null;
   const chip = s => { if (!two || !two.thru) return ""; const me = (s === two.a ? 1 : -1) * two.up;
     return me > 0 ? `<span class="mchip up">${me} UP</span>` : me === 0 ? `<span class="mchip as">AS</span>` : ""; };
-  const board = card.players.map(s => ({ s, t: cardTotals(card, s), p: st.pts[s], ch: cardCh(card, s), sk: sk ? sk.skins[s] : 0 }))
+  const board = card.players.map(s => ({ s, t: cardTotals(card, s), p: st.pts[s], ch: cardCh(card, s), sk: sk ? sk.skins[s] ?? 0 : 0 }))
     .sort((a, b) => (b.t.thru ? 1 : 0) - (a.t.thru ? 1 : 0) || (sk ? b.sk - a.sk : b.p.pts - a.p.pts) || a.t.toPar - b.t.toPar);
   const others = state.cards.filter(c => c.id !== id);
 
@@ -1894,7 +1930,7 @@ function viewCard(id) {
       <tbody>${card.players.map(s => { const v = holeVals(card, s); const got = idx.filter(i => v[i] != null);
         const ch = cardCh(card, s), net = ch == null ? null : sum(got.map(i => v[i] - strokesOn(ch, si[i], n)));
         return `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}${ch != null ? `<small class="sch">${ch}</small>` : ""}</td>${idx.map(i => `<td class="${pops[s][i] > 0 ? "pop" : ""} ${wins[i] === s ? "won" : ""}"><span class="${v[i] == null ? "" : scoreCls(v[i], card.pars[i])}">${v[i] ?? ""}</span></td>`).join("")}<td><b>${got.length ? sum(got.map(i => v[i])) : ""}</b>${got.length && net != null ? `<small class="snet">net ${net}</small>` : ""}</td></tr>`; }).join("")}${two ? (() => { let up = 0; const run = card.pars.map((_, i) => { if (wins[i] === undefined) return null; up += wins[i] === two.a ? 1 : wins[i] === two.b ? -1 : 0; return up; });
-        return `<tr class="mrow"><td>Match</td>${idx.map(i => run[i] == null ? "<td></td>" : `<td><span class="ms" style="color:${run[i] ? P[run[i] > 0 ? two.a : two.b].color : "var(--muted)"}">${run[i] ? Math.abs(run[i]) : "AS"}</span></td>`).join("")}<td></td></tr>`; })() : ""}</tbody></table>`;
+        return `<tr class="mrow"><td>Match</td>${idx.map(i => run[i] == null ? "<td></td>" : `<td><span class="ms" style="color:${run[i] ? pcolor(run[i] > 0 ? two.a : two.b) : "var(--muted)"}">${run[i] ? Math.abs(run[i]) : "AS"}</span></td>`).join("")}<td></td></tr>`; })() : ""}</tbody></table>`;
   };
   const hl = st.moments.filter(m => m.i < n || m.kind === "great");
   const highlights = hl.length ? `<section class="card"><h3>Highlights</h3><div class="moments">${hl.slice(0, 6).map(m => `<div class="mom ${m.kind}"><span class="mh2">${m.i < n ? m.i + 1 : "F"}</span>${esc(m.text)}</div>`).join("")}</div>
@@ -2021,25 +2057,6 @@ function cardScorecard(id) {
       if (toCourse) await saveCourseCard(card.course_name, pars, sis);
     } });
 }
-function courseScorecard(name) {
-  if (!editing()) return phraseForm(() => courseScorecard(name));
-  const c = state.courses.find(x => x.name === name); if (!c) return;
-  const n = c.pars?.length || (c.par && c.par < 50 ? 9 : 18);
-  const pars = c.pars?.length === n ? c.pars : Array(n).fill(4);
-  scorecardForm({ title: "Edit scorecard", sub: name, pars, sis: c.sis?.length === n ? c.sis : null,
-    onSave: (p, s) => saveCourseCard(name, p, s) });
-}
-function scorecardsSection() {
-  const names = [...new Set(state.courses.map(c => c.name))].sort();
-  if (!names.length) return "";
-  return `<section class="card"><details><summary><h3 class="inl">Course scorecards</h3> <span class="muted small">${names.length}</span></summary>
-    ${names.map(n => { const rows = state.courses.filter(c => c.name === n); const c = rows[0];
-      const ok = c.pars?.length && c.sis?.length === c.pars.length;
-      return `<div class="crow"><div><b>${esc(n)}</b><div class="muted small">${rows.length} tee${rows.length === 1 ? "" : "s"} · ${c.pars?.length ? `par ${c.pars.reduce((a, b) => a + b, 0)}` : "no hole pars"} · ${ok ? "hole handicaps saved" : `<span class="warnt">missing hole handicaps</span>`}</div></div>
-        <button class="link ed" data-act="course-sc" data-id="${esc(n)}">Edit</button></div>`; }).join("")}
-    <p class="hint">Tap Enter scores to edit.</p></details></section>`;
-}
-
 // ---------- round scorecards (hole by hole, read only) ----------
 // Rounds posted from a live card keep hole_scores. Rounds of the same match (or same day,
 // course and tee) are grouped into one scorecard. Pars come from the saved course.
@@ -2055,6 +2072,11 @@ function rscGroups(slug) {
     if (!r.hole_scores?.length) continue;
     const k = r.match_id || `${r.played_on}|${r.course_name}|${r.tee_name || ""}`;
     (groups[k] ||= { key: k, played_on: r.played_on, course_name: r.course_name, tee_name: r.tee_name, rounds: [] }).rounds.push(r);
+  }
+  // Guests ride along on the family's scorecard for that round (never a card of their own).
+  for (const r of state.guestRounds) {
+    if (!r.hole_scores?.length) continue;
+    groups[r.match_id || `${r.played_on}|${r.course_name}|${r.tee_name || ""}`]?.rounds.push(r);
   }
   const order = s => { const i = PLAYERS.findIndex(p => p.slug === s); return i < 0 ? 99 : i; };
   return Object.values(groups)
@@ -2096,6 +2118,127 @@ function roundScorecardView(id) {
     <div class="mpl">${totals}</div>`);
 }
 
+// ---------- guests (saved in a hidden list, picked or added at round start) ----------
+// Handicap typed like the card: "12.4", or "+2" for a plus handicap (stored as -2).
+function parseHcp(raw) {
+  const t = String(raw ?? "").trim(); if (!t) return { v: null };
+  const v = t.startsWith("+") ? -Number(t.slice(1)) : Number(t);
+  if (isNaN(v) || v < -10 || v > 54) return { err: "Handicap is a number from +10 to 54." };
+  return { v: r1(v) };
+}
+const guestRoundCount = slug => state.guestRounds.filter(r => r.player === slug).length;
+// The guest list on a start form: pick a saved guest or add a new one, and say if they're in the money.
+function guestPicker() {
+  const saved = [...state.guests].sort((a, b) => guestName(a).localeCompare(guestName(b)));
+  return `<div class="gpicker"><div class="laylbl">Guests</div>
+    <div class="glist"></div>
+    <select name="g_pick" aria-label="Add a guest"><option value="">+ Add a guest</option>${saved.map(g => `<option value="${g.id}">${esc(guestName(g))} · hcp ${fmtIdx(g.handicap)}</option>`).join("")}<option value="new">New guest…</option></select>
+    <div class="gnew" hidden>
+      <div class="row2"><label>First name<input name="g_first" autocomplete="off" autocapitalize="words"></label><label>Last name<input name="g_last" autocomplete="off" autocapitalize="words"></label></div>
+      <label>Handicap<input name="g_hcp" inputmode="decimal" placeholder="e.g. 14.2"></label>
+      <label class="chk"><input type="checkbox" name="g_money"> In the money</label>
+      <div class="acts"><button type="button" class="primary" data-g="add">Add to round</button><button type="button" data-g="cancel">Cancel</button></div>
+    </div>
+    <p class="hint">Guests play the game on the card. Tick In the money to put them in the bets too. Guests never count in head to head, Master Champ or money totals.</p></div>`;
+}
+// Returns { commit } once wired: commit() saves new or changed guests and returns { slugs, meta }.
+function wireGuestPicker(root, onChange) {
+  const box = root.querySelector(".gpicker"); if (!box) return null;
+  const q = n => box.querySelector(`[name=${n}]`);
+  const list = []; // { id, first, last, hcp, money }
+  let adding = null; // saved guest id being added, or "new"
+  const paint = () => {
+    box.querySelector(".glist").innerHTML = list.map((g, i) => `<div class="grow"><span class="gname">${dot("g_x")}${esc([g.first, g.last].filter(Boolean).join(" "))} <small class="muted">hcp ${fmtIdx(g.hcp)}</small></span>
+      <label class="chk gm"><input type="checkbox" data-gm="${i}" ${g.money ? "checked" : ""} aria-label="${esc(g.first)} in the money"> Money</label>
+      <button type="button" class="link" data-g="rm" data-i="${i}" aria-label="Remove ${esc(g.first)}">✕</button></div>`).join("");
+    [...q("g_pick").options].forEach(o => { if (o.value && o.value !== "new") o.hidden = list.some(g => g.id === o.value); });
+    onChange?.(list.filter(g => g.money).length);
+  };
+  const close = () => { adding = null; box.querySelector(".gnew").hidden = true; q("g_pick").value = ""; q("g_pick").hidden = false; };
+  q("g_pick").onchange = () => {
+    const v = q("g_pick").value; if (!v) return;
+    const g = v === "new" ? null : state.guests.find(x => x.id === v);
+    adding = v;
+    q("g_first").value = g?.first_name || ""; q("g_last").value = g?.last_name || ""; q("g_hcp").value = g ? (g.handicap == null ? "" : fmtIdx(g.handicap)) : ""; q("g_money").checked = false;
+    q("g_pick").hidden = true; box.querySelector(".gnew").hidden = false;
+    if (!g) q("g_first").focus();
+  };
+  const add = () => {
+    const first = q("g_first").value.trim(), last = q("g_last").value.trim();
+    if (!first) return toast("Type the guest's first name.");
+    const h = parseHcp(q("g_hcp").value); if (h.err) return toast(h.err);
+    if (h.v == null) return toast("Type the guest's handicap (0 if they don't have one).");
+    list.push({ id: adding === "new" ? null : adding, first, last, hcp: h.v, money: q("g_money").checked });
+    close(); paint();
+  };
+  box.addEventListener("click", e => {
+    const b = e.target.closest("[data-g]"); if (!b) return;
+    if (b.dataset.g === "add") add();
+    if (b.dataset.g === "cancel") close();
+    if (b.dataset.g === "rm") { list.splice(Number(b.dataset.i), 1); paint(); }
+  });
+  box.addEventListener("change", e => { const s = e.target.closest("[data-gm]"); if (s) { list[Number(s.dataset.gm)].money = s.checked; paint(); } });
+  box.addEventListener("keydown", e => { if (e.key === "Enter" && e.target.closest(".gnew")) { e.preventDefault(); add(); } });
+  paint();
+  return {
+    count: () => list.length,
+    pending: () => adding != null,
+    async commit() {
+      const meta = {}, slugs = [];
+      for (const g of list) {
+        const row = { first_name: g.first, last_name: g.last || null, handicap: g.hcp };
+        const old = g.id && state.guests.find(x => x.id === g.id);
+        if (!old) { g.id = await save("guests", row); }
+        else if (old.first_name !== row.first_name || (old.last_name || null) !== row.last_name || old.handicap !== row.handicap) { await save("guests", row, g.id); Object.assign(old, row); }
+        const slug = "g_" + g.id, name = [g.first, g.last].filter(Boolean).join(" ");
+        GUESTS[slug] = { name, hcp: g.hcp };
+        meta[slug] = { name, hcp: g.hcp, money: g.money };
+        slugs.push(slug);
+      }
+      return { slugs, meta };
+    }
+  };
+}
+// Head to Head: the saved guests (collapsed, so the page stays about the family).
+function guestsSection() {
+  const gs = [...state.guests].sort((a, b) => guestName(a).localeCompare(guestName(b)));
+  return `<section class="card"><details><summary><h3 class="inl">Guests</h3> <span class="muted small">${gs.length}</span></summary>
+    ${gs.map(g => { const n = guestRoundCount("g_" + g.id);
+      return `<div class="crow"><div><b>${esc(guestName(g))}</b><div class="muted small">hcp ${fmtIdx(g.handicap)} · ${n} round${n === 1 ? "" : "s"}</div></div>
+        <button class="link ed" data-act="guest" data-id="${g.id}">Edit</button></div>`; }).join("") || `<div class="empty">No guests yet.</div>`}
+    <div class="ed acts"><button type="button" data-act="guest" data-id="">+ Add a guest</button></div>
+    <p class="hint">Add guests here or when you start a scorecard. They show on the live card and scorecards only, never in head to head, Master Champ, handicaps or money totals.</p></details></section>`;
+}
+function guestForm(id) {
+  if (!editing()) return phraseForm(() => guestForm(id));
+  const g = id ? state.guests.find(x => x.id === id) : null;
+  if (id && !g) return;
+  openModal(`<h2>${g ? "Edit guest" : "Add a guest"}</h2>
+    <form id="gf2">
+      <div class="row2"><label>First name<input name="first" value="${esc(g?.first_name || "")}" required autocomplete="off" autocapitalize="words"></label>
+      <label>Last name<input name="last" value="${esc(g?.last_name || "")}" autocomplete="off" autocapitalize="words"></label></div>
+      <label>Handicap<input name="hcp" inputmode="decimal" value="${g?.handicap == null ? "" : fmtIdx(g.handicap)}" placeholder="e.g. 14.2" required></label>
+      <p class="hint">Their handicap stays what you type. It doesn't move with their scores.</p>
+      <div class="acts"><button class="primary" type="submit">Save</button>${g ? `<button type="button" class="danger" id="gdel">Delete guest</button>` : ""}</div>
+    </form>`, m => {
+    const f = $("#gf2", m);
+    f.onsubmit = async e => {
+      e.preventDefault();
+      const first = f.first.value.trim(), last = f.last.value.trim();
+      if (!first) return toast("Type a first name.");
+      const h = parseHcp(f.hcp.value); if (h.err) return toast(h.err);
+      if (h.v == null) return toast("Type a handicap (0 if they don't have one).");
+      try { await save("guests", { first_name: first, last_name: last || null, handicap: h.v }, g?.id); closeModal(); await refresh(); toast("Guest saved."); }
+      catch (err) { toast("Couldn't save: " + errMsg(err)); }
+    };
+    $("#gdel", m)?.addEventListener("click", async () => {
+      if (!confirm(`Delete ${guestName(g)}? Their old scorecards stay.`)) return;
+      try { await remove("guests", g.id); closeModal(); await refresh(); toast("Guest deleted."); }
+      catch (err) { toast("Couldn't delete: " + errMsg(err)); }
+    });
+  });
+}
+
 // ---------- start match: pick tees, then straight to the Live tab ----------
 function startMatch(mt) {
   if (!mt) return;
@@ -2114,12 +2257,14 @@ function startMatch(mt) {
     <div class="teepick">${tees.map(t => `<button type="button" class="teeopt ${t.id === pick.id ? "on" : ""}" data-tee="${t.id}"><b>${esc(t.tee_name || "Tees")}</b><span>${t.rating}/${t.slope}</span></button>`).join("")}</div>
     ${has18 ? `<div class="laylbl">Holes</div><div class="seg2"><button type="button" class="on" data-holes="18">18</button><button type="button" data-holes="9">Front 9</button></div>` : ""}
     <div id="smstrokes" class="hint"></div>
-    ${multi ? `<div class="laylbl">Bets</div>${betFields(mt.bets === undefined ? BET_DEFAULT : mt.bets, has18 ? 18 : 9)}` : ""}
+    ${guestPicker()}
+    <div class="smbets" ${multi ? "" : "hidden"}><div class="laylbl">Bets</div>${betFields(mt.bets === undefined ? BET_DEFAULT : mt.bets, has18 ? 18 : 9)}</div>
     ${gameSelectHtml(initGame)}
     <div class="acts"><button class="primary big" id="teeoff">Check scorecard ›</button></div>
     <p class="muted small">Not the right course? <button class="link" id="smfull">Change course or players</button></p></div>`, m => {
-    let holes = has18 ? 18 : 9, game = initGame;
-    const syncBets = multi ? wireBets(m, holes) : null;
+    let holes = has18 ? 18 : 9, game = initGame, betsOn = multi;
+    const syncBets = wireBets(m, holes);
+    const gpick = wireGuestPicker(m, money => { betsOn = mt.players.length + money > 1; m.querySelector(".smbets").hidden = !betsOn; });
     const preview = () => {
       if (game === "stroke" || game === "gross") { $("#smstrokes", m).textContent = "Gross stroke play: playing straight up, no strokes."; return; }
       const c = { rating: pick.rating, slope: pick.slope, par: pick.par };
@@ -2137,23 +2282,27 @@ function startMatch(mt) {
     if (gsel) gsel.onchange = () => { game = gsel.value; preview(); };
     $("#smfull", m).onclick = () => cardForm(mt);
     preview();
-    $("#teeoff", m).onclick = () => {
+    $("#teeoff", m).onclick = async () => {
       const n = holes;
-      const bets = multi ? readBets(m, n) : null; if (bets === false) return;
+      if (gpick.pending()) return toast("Tap Add to round for the guest first, or Cancel.");
+      const bets = betsOn ? readBets(m, n) : null; if (bets === false) return;
+      let gx;
+      try { gx = await gpick.commit(); } catch (err) { return toast("Couldn't save the guest: " + errMsg(err)); }
+      const allPlayers = [...mt.players, ...gx.slugs];
       const pars = pick.pars?.length >= n ? pick.pars.slice(0, n) : Array(n).fill(4);
       let sis = null;
       if (pick.sis?.length === 18) { const s9 = pick.sis.slice(0, n); sis = n === 9 ? s9.map(x => s9.filter(y => y < x).length + 1) : pick.sis; }
       else if (pick.sis?.length === n) sis = pick.sis;
       confirmCard(m, $(".step1", m), { course_name: pick.name, tee_name: pick.tee_name, rating: pick.rating, slope: pick.slope, par: pick.par,
-        pars, sis, parsKnown: pick.pars?.length >= n, players: mt.players, saveName: pick.name, game,
-        betsLine: bets ? stakesText(bets, n) : multi ? "No money" : "" },
+        pars, sis, parsKnown: pick.pars?.length >= n, players: allPlayers, guests: gx.meta, saveName: pick.name, game,
+        betsLine: bets ? stakesText(bets, n) : betsOn ? "No money" : "" },
         async (pars, sis, toCourse, hcpOv) => {
           if (toCourse) await saveCourseCard(pick.name, pars, sis);
           const sc = dbScoring(game);
           await save("matches", { course_id: pick.id, tee_name: pick.tee_name, rating: pick.rating, slope: pick.slope, par: pick.par, scoring: sc, bets }, mt.id);
-          const meta = { game, ...(Object.keys(hcpOv || {}).length ? { hcp: hcpOv } : {}) };
+          const meta = { game, ...(Object.keys(hcpOv || {}).length ? { hcp: hcpOv } : {}), ...(gx.slugs.length ? { guests: gx.meta } : {}) };
           const id = await save("cards", { played_on: today(), course_id: pick.id, course_name: pick.name, tee_name: pick.tee_name,
-            rating: pick.rating, slope: pick.slope, par: pick.par, pars, sis, players: mt.players, scores: { __meta: meta }, match_id: mt.id,
+            rating: pick.rating, slope: pick.slope, par: pick.par, pars, sis, players: allPlayers, scores: { __meta: meta }, match_id: mt.id,
             scoring: sc, status: "live", bets });
           localStorage.setItem("golf_hole_" + id, "0");
           closeModal(); await loadData(); location.hash = "card/" + id;
@@ -2171,6 +2320,7 @@ function cardForm(fromMatch) {
     <form id="cf">
       ${todays.length || fromMatch ? `<label>Match<select name="match"><option value="">Not a match</option>${[...new Set([...(fromMatch ? [fromMatch] : []), ...todays])].map(m => `<option value="${m.id}" ${m0 && m.id === m0.id ? "selected" : ""}>${fmtShort(m.scheduled_for)} · ${esc(m.course_name || "match")} · ${m.players.map(pname).join(", ")}</option>`).join("")}</select></label>` : ""}
       <fieldset><legend>Who's playing</legend>${PLAYERS.map(p => `<label class="chk"><input type="checkbox" name="pl" value="${p.slug}" ${(m0 ? m0.players : PLAYERS.map(x => x.slug)).includes(p.slug) ? "checked" : ""}> ${dot(p.slug)}${esc(p.name)}</label>`).join("")}</fieldset>
+      ${guestPicker()}
       <div class="row2"><label>Date<input type="date" name="played_on" value="${today()}" required></label>
       <label>Holes<select name="holes"><option>18</option><option>9</option></select></label></div>
       ${courseFields(v)}
@@ -2180,6 +2330,7 @@ function cardForm(fromMatch) {
     </form></div>`, m => {
     const f = $("#cf", m); wireCoursePicker(f);
     const syncBets = wireBets(f, 18);
+    const gpick = wireGuestPicker(f);
     f.holes.onchange = () => syncBets(Number(f.holes.value));
     if (f.match) f.match.onchange = () => {
       const mt = state.matches.find(x => x.id === f.match.value); if (!mt) return;
@@ -2196,6 +2347,7 @@ function cardForm(fromMatch) {
       const players = [...f.querySelectorAll("[name=pl]:checked")].map(x => x.value);
       if (!players.length) return toast("Pick who's playing.");
       if (!c.course_name) return toast("Pick or type the course.");
+      if (gpick.pending()) return toast("Tap Add to round for the guest first, or Cancel.");
       let pars = c.pars?.length === 18 ? (n === 9 ? c.pars.slice(0, 9) : c.pars) : c.pars?.length === 9 && n === 9 ? c.pars : Array(n).fill(4);
       // 9 holes from an 18-hole card: rank those 9 holes by their 18-hole handicaps.
       let sis = null;
@@ -2203,18 +2355,23 @@ function cardForm(fromMatch) {
       else if (c.sis?.length === n) sis = c.sis;
       const mt = state.matches.find(x => x.id === f.match?.value);
       const game = f.game?.value || "match";
-      const bets = players.length > 1 ? readBets(f, n) : null; if (bets === false) return;
+      // Guests in the money join the game and the bets; guests who aren't just keep score.
+      const moneyGuests = () => f.querySelectorAll(".gpicker [data-gm]:checked").length;
+      const inPlay = players.length + moneyGuests();
+      const bets = inPlay > 1 ? readBets(f, n) : null; if (bets === false) return;
       const known = c.pars?.length === n || (c.pars?.length === 18 && n === 9);
+      let gx;
+      try { gx = await gpick.commit(); } catch (err) { return toast("Couldn't save the guest: " + errMsg(err)); }
       confirmCard(m, $(".step1", m), { course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: c.par,
-        pars, sis, parsKnown: known, players, game, saveName: state.courses.some(x => x.name === c.course_name) || (c.rating && c.slope && c.par) ? c.course_name : null,
-        betsLine: bets ? stakesText(bets, n) : players.length > 1 ? "No money" : "" },
+        pars, sis, parsKnown: known, players: [...players, ...gx.slugs], guests: gx.meta, game, saveName: state.courses.some(x => x.name === c.course_name) || (c.rating && c.slope && c.par) ? c.course_name : null,
+        betsLine: bets ? stakesText(bets, n) : inPlay > 1 ? "No money" : "" },
         async (pars, sis, toCourse, hcpOv) => {
           const course_id = c.rating && c.slope && c.par ? await ensureCourse({ ...c, name: c.course_name, ...(toCourse ? { pars, sis } : {}) }) : null;
           if (toCourse) await saveCourseCard(c.course_name, pars, sis);
           const sc = dbScoring(game);
-          const meta = { game, ...(Object.keys(hcpOv || {}).length ? { hcp: hcpOv } : {}) };
+          const meta = { game, ...(Object.keys(hcpOv || {}).length ? { hcp: hcpOv } : {}), ...(gx.slugs.length ? { guests: gx.meta } : {}) };
           const row = { played_on: f.played_on.value, course_id, course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope,
-            par: c.par, pars, sis, players, scores: { __meta: meta }, match_id: f.match?.value || null, scoring: sc, status: "live", bets };
+            par: c.par, pars, sis, players: [...players, ...gx.slugs], scores: { __meta: meta }, match_id: f.match?.value || null, scoring: sc, status: "live", bets };
           const id = await save("cards", row);
           if (mt) await save("matches", { scoring: sc, bets }, mt.id);
           localStorage.setItem("golf_hole_" + id, "0");
@@ -2235,7 +2392,7 @@ function finishForm(id) {
       <div class="board">${rows.map(x => `<div class="br"><span>${dot(x.s)}${esc(pname(x.s))}</span><span class="n">${x.t.done ? `<b>${x.t.gross}</b> ${fmtToPar(x.t.toPar)} · ${cardPts(card, x.s).pts} pts` : `<span class="warnt">${x.t.thru}/${n} holes, won't be posted</span>`}</span></div>`).join("")}</div>
       ${card.players.length > 1 ? `<div class="mpl">${cardPairs(card).map(pr => `<div class="mpr"><span>${esc(pname(pr.a))} v ${esc(pname(pr.b))}</span><b>${esc(pr.text)}</b></div>`).join("")}</div>` : ""}
       ${bet ? `<div class="cbets"><span>Money</span><b>${bet.pays.length ? paysText(bet.pays) : "Nobody pays"}</b></div>${bet.done ? "" : `<p class="hint">Bets that didn't finish push.</p>`}` : ""}
-      <p class="hint">Each finished score goes on that player's round log${card.match_id ? " and the match gets its result" : ""}.${n === 9 ? " 9-hole rounds don't count toward handicaps." : ""}</p>
+      <p class="hint">Each finished score goes on that player's round log${card.match_id ? " and the match gets its result" : ""}.${n === 9 ? " 9-hole rounds don't count toward handicaps." : ""}${card.players.some(isGuest) ? " Guests go on the scorecard only." : ""}</p>
       <div class="acts"><button class="primary" type="submit">Submit round</button><button type="button" data-close>Keep playing</button></div>
     </form>`, m => {
     const f = $("#ff", m); wireCoursePicker(f);
@@ -2250,19 +2407,23 @@ function finishForm(id) {
         await flushSaves();
         const course_id = await ensureCourse({ ...c, name: c.course_name, pars: n === 18 ? card.pars : null, sis: n === 18 && card.sis?.length === 18 ? card.sis : null });
         // Money needs a match to live on: make one for a card that wasn't started from a scheduled round.
+        // Matches only list the family (guests stay out of head to head); guest money rides in bets.result.
+        const fam = card.players.filter(s => !isGuest(s)), famDone = done.filter(x => !isGuest(x.s));
         let matchId = card.match_id || null;
-        if (!matchId && bet && done.length >= 2) {
+        if (!matchId && bet && famDone.length >= 2) {
           matchId = await save("matches", { scheduled_for: card.played_on, course_id, course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: c.par,
-            players: card.players, status: "scheduled", scoring: card.scoring || "match", title_match: false });
+            players: fam, status: "scheduled", scoring: card.scoring || "match", title_match: false });
           await save("cards", { match_id: matchId }, id); card.match_id = matchId;
         }
         for (const x of done) {
           const cc = { ...card, rating: c.rating, slope: c.slope, par: c.par };
           await save("rounds", { player: x.s, played_on: card.played_on, holes: n, score: x.t.gross, hole_scores: holeVals(card, x.s), points: cardPts(cc, x.s).pts,
-            course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: n === 9 && c.par >= 50 ? parSum : c.par, course_id, match_id: matchId });
+            course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: n === 9 && c.par >= 50 ? parSum : c.par, course_id, match_id: matchId,
+            ...(isGuest(x.s) ? { notes: "Guest: " + pname(x.s) } : {}) });
         }
-        if (matchId && done.length >= 2) await save("matches", { status: "final", course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: c.par, course_id,
-          bets: bet ? { ...card.bets, result: { pays: bet.pays, net: bet.net } } : null }, matchId);
+        const gNames = Object.fromEntries(card.players.filter(isGuest).map(s => [s, { name: pname(s) }]));
+        if (matchId && famDone.length >= 2) await save("matches", { status: "final", course_name: c.course_name, tee_name: c.tee_name, rating: c.rating, slope: c.slope, par: c.par, course_id,
+          bets: bet ? { ...card.bets, result: { pays: bet.pays, net: bet.net, ...(Object.keys(gNames).length ? { guests: gNames } : {}) } } : null }, matchId);
         await save("cards", { status: "done" }, id);
         closeModal(); await loadData(); location.hash = "h2h"; toast("Round posted.");
       } catch (err) { btn.disabled = false; toast("Couldn't post: " + errMsg(err)); }
@@ -2323,7 +2484,7 @@ document.addEventListener("click", e => {
   if (act === "press") pressForm(id);
   if (act === "unpress") unpress(id, Number(b.dataset.v));
   if (act === "money") moneyForm(state.matches.find(m => m.id === id));
-  if (act === "course-sc") courseScorecard(id);
+  if (act === "guest") guestForm(id || null);
   if (act === "rsc") roundScorecardView(id);
   if (act === "card-del") { if (confirm("Delete this scorecard? Scores on it are lost.")) remove("cards", id).then(async () => { await loadData(); location.hash = "h2h"; toast("Deleted."); }).catch(err => toast(errMsg(err))); }
   if (["hole", "sc", "par", "theme"].includes(act)) cardAction(act, b);

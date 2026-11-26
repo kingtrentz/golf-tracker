@@ -103,16 +103,27 @@ create policy "public read" on photos for select to anon, authenticated using (t
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('photos', 'photos', true, 5242880, array['image/jpeg','image/png','image/webp']) on conflict (id) do nothing;
 
+-- Guests: people who play a round with the family. Hidden list on the site (Head to Head > Guests).
+-- On a live card a guest is "g_" + id; their rounds use that as player and never count in stats.
+create table if not exists guests (
+  id uuid primary key default gen_random_uuid(),
+  first_name text not null,
+  last_name text,
+  handicap numeric(4,1) check (handicap between -10 and 54),
+  created_at timestamptz not null default now()
+);
+
 alter table courses enable row level security;
 alter table matches enable row level security;
 alter table rounds  enable row level security;
 alter table players enable row level security;
 alter table cards   enable row level security;
+alter table guests  enable row level security;
 
 do $$
 declare t text;
 begin
-  foreach t in array array['courses','matches','rounds','players','cards'] loop
+  foreach t in array array['courses','matches','rounds','players','cards','guests'] loop
     execute format('drop policy if exists "public read" on %I', t);
     execute format('drop policy if exists "members write" on %I', t);
     execute format('create policy "public read" on %I for select to anon, authenticated using (true)', t);
@@ -146,7 +157,7 @@ language plpgsql security definer set search_path = '' as $f$
 declare cols text; out_id uuid;
 begin
   if not private.phrase_ok(p) then raise exception 'Wrong security phrase.'; end if;
-  if tbl not in ('courses','matches','rounds','cards','photos') then raise exception 'Bad table'; end if;
+  if tbl not in ('courses','matches','rounds','cards','photos','guests') then raise exception 'Bad table'; end if;
   select string_agg(quote_ident(c.column_name), ',') into cols from information_schema.columns c
    where c.table_schema = 'public' and c.table_name = tbl and c.column_name in (select jsonb_object_keys(data))
      and c.column_name not in ('id','created_at','created_by');
@@ -164,7 +175,7 @@ create or replace function public.gt_delete(p text, tbl text, rid uuid) returns 
 language plpgsql security definer set search_path = '' as $f$
 begin
   if not private.phrase_ok(p) then raise exception 'Wrong security phrase.'; end if;
-  if tbl not in ('courses','matches','rounds','cards') then raise exception 'Bad table'; end if;
+  if tbl not in ('courses','matches','rounds','cards','guests') then raise exception 'Bad table'; end if;
   execute format('delete from public.%I where id = $1', tbl) using rid;
 end $f$;
 

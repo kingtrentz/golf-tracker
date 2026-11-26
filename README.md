@@ -5,7 +5,7 @@ Live site: https://kingtrentz.github.io/golf-tracker/
 Trent vs Dad vs Logan: rounds, handicaps, head to head, live scorecards, upcoming matches, and the Master Champ belt.
 by kingtrentz⚡️ x claude
 
-This README is the knowledge doc for the repo: what the site does, how the data works, how to deploy it, and known issues. It describes the code as of Nov 26, 2026 (live card fast-tap fix). Anything not read directly from the code is marked *(inferred)*.
+This README is the knowledge doc for the repo: what the site does, how the data works, how to deploy it, and known issues. It describes the code as of Nov 26, 2026 (guest players). Anything not read directly from the code is marked *(inferred)*.
 
 **Working rule for this site:** careful cleanup in small steps, each approved before it goes live. No redesigns.
 
@@ -14,7 +14,7 @@ Tabs (built in `app.js`):
 - **Live** (only while a round is on): full-screen on-course scorecard with big +/- buttons. Every tap saves; with no signal, scores wait on the phone and save when it reconnects. Anyone with the link can follow along.
   - **Auto-advance:** when a tap fills the last empty score on a hole, the card shows "Hole N next…" and moves on 1.6 seconds after the last tap (more taps restart the wait). Fixing a hole that was already complete doesn't move you. The hole being scored is pinned on the phone, so a card started on another phone no longer jumps the instant the last score goes in.
   - **Fast taps:** for 0.45 seconds after the hole changes, taps on the card are ignored, so quick taps can't land on the next hole or skip one. Buttons use `touch-action: manipulation`, so fast double taps don't zoom the page (pinch zoom still works). Code: `goHole`, `cardAction`, `ADV_MS`, `HOLE_SETTLE_MS` in `app.js`.
-- **Head to Head:** matchups, handicaps, upcoming rounds, the Master Champ belt, and every hole-by-hole scorecard (Scorecards section).
+- **Head to Head:** matchups, handicaps, upcoming rounds, the Master Champ belt, every hole-by-hole scorecard (Scorecards section), and the saved guests (Guests section, which replaced the old Course scorecards editor).
 - **One tab per player** (Trent, Logan, Dad): round log, handicap, best scores, and that player's hole-by-hole scorecards (Scorecards section).
 - **Gallery:** course photos, filterable by course.
 
@@ -23,6 +23,8 @@ Features worth knowing:
 - **Handicaps:** each player starts at a starting handicap; after every 18-hole round it moves 25% of the way toward that round's differential ((score - rating) x 113 / slope). `handicapStep` in `config.js` overrides the 25% (it isn't set now, so 25% applies). Unofficial, not the USGA best-8-of-20 index. The same math is copied in `supabase/functions/push/golf.ts`; keep the two in step.
 - **Master Champ:** title matches only count when all three play.
 - **Scorecards (read only):** the Scorecards section on Head to Head and each player tab lists finished rounds that have hole-by-hole scores, newest first (5 shown, the rest under Show all). Tapping one (or the "hole by hole" tag in a round log) opens the card: holes, par, each player's strokes, Out/In/Tot, final score and to par, with birdies circled and bogeys boxed. Rounds of the same match (or same day, course and tee) share one card. Data: `rounds.hole_scores`, saved when a live card is submitted; pars come from the saved course (`courses.pars`) and are left off if the course has none. Rounds posted as a final score only have no scorecard. Code: `rscGroups`, `roundScorecardsSection`, `roundScorecardView` in `app.js`.
+- **Guests:** anyone outside the family can join a round. When starting a scorecard (or a scheduled match's scorecard), pick a saved guest or add a new one (first name, last name, handicap; "+2" means a plus handicap). Each guest gets a row on the live card and plays the game like everyone else (strokes off the typed handicap, holes, skins, points). The **In the money** checkbox (off by default) puts that guest in the bets; unticked guests are left out of the bets and payouts. Guests are saved in a hidden list, not as player tabs; the Guests section on Head to Head lists them and edits name and handicap. Guest rounds are saved to `rounds` with `player` = `g_<guest id>` and the note "Guest: name", and show only on that round's scorecard. They never count in head to head, Master Champ, handicaps, round logs or money totals, and a match record is only made when two or more family players finish. On the card, guests are stored in `cards.scores.__meta.guests` (`{ "g_<id>": { name, hcp, money } }`), so the card keeps the name and handicap used that day. Code: `guestPicker`, `wireGuestPicker`, `guestsSection`, `guestForm`, `splitGuests`, `cardGuests`, `inMoney`, `bettors` in `app.js`.
+- Hole pars and hole handicaps are still edited from a live card (Edit scorecard, or tap Par/Hcp on a hole) and on the Check the scorecard step.
 - **Courses near me:** uses the phone's location to list saved courses, OpenGolfAPI courses and OpenStreetMap golf courses nearby. OpenGolfAPI fills rating, slope, par and hole pars when it has them; otherwise type them once from the scorecard and the course is saved with its location.
 - **On-course yardages and hole maps:** one-tap GPS yardage, hole outlines and rough yardages, and satellite hole maps (Esri World Imagery tiles) with drag-to-measure. Green and hole outlines come from OpenStreetMap: `greens.json` for saved courses (built by `tools/greens.py`), otherwise the page asks Overpass once and caches it on the phone.
 - **Theme:** dark by default, with a Light mode toggle (saved per phone).
@@ -39,7 +41,7 @@ There is no build step and no scheduled data pull. The site is plain static file
 | Piece | Where | What it does |
 |---|---|---|
 | Static site | `index.html`, `style.css`, `app.js`, `config.js`, `demo.js` | Reads Supabase directly from the browser with the public (publishable) key in `config.js` |
-| Tables | `setup.sql` | `courses`, `matches`, `rounds`, `players` (starting handicaps), `cards` (live scorecards), `photos` |
+| Tables | `setup.sql` | `courses`, `matches`, `rounds`, `players` (starting handicaps), `cards` (live scorecards), `photos`, `guests` (saved guest players: first name, last name, handicap) |
 | Writes | `setup.sql` functions `gt_save`, `gt_delete`, `gt_set_start`, `gt_card_score`, `gt_check` | Every write needs the family security phrase, checked inside the database (stored hashed in `private.app_secret`, never in this code). 25 wrong tries in 10 minutes locks writes for 10 minutes. Each phone remembers the phrase until you tap Lock |
 | Photos | `photos` table, public `photos` storage bucket (5 MB, JPEG/PNG/WebP) | Uploads and deletes go through the `gallery` edge function, which checks the phrase and hands out signed upload URLs |
 | Push alerts | `supabase/push.sql`, edge function `push` (`index.ts` + `golf.ts`) | `push_subs` and `push_sent` tables (private). A trigger on `cards` calls the function on tee off, every saved score and when a round is submitted; a pg_cron job (`golf-push-sweep`) calls it every minute while a card is live; `golf-push-cleanup` prunes old records daily. The function re-reads the card and sends each alert once. Needs the `VAPID_PRIVATE_KEY` secret in Supabase |
@@ -58,6 +60,7 @@ With no Supabase keys in `config.js`, the site runs on the sample data in `demo.
 | `greens.json` | Green and hole outlines from OpenStreetMap for saved courses |
 | `tools/greens.py` | Rebuilds `greens.json` (`python tools/greens.py`, run from the repo root) |
 | `setup.sql` | Database tables, write functions, phrase check, photo bucket |
+| `supabase/migrations/2026-11-26_guests.sql` | Adds the `guests` table and lets `gt_save` / `gt_delete` write it. Additive only; run it once on the live database before the guests feature goes live |
 | `supabase/push.sql` | Push alert tables, trigger and cron jobs (applied Nov 23, 2026) |
 | `supabase/functions/gallery/index.ts` | Photo upload and delete function |
 | `supabase/functions/push/` | Push alert sender (`index.ts`) and golf math (`golf.ts`) |
@@ -82,4 +85,5 @@ With no Supabase keys in `config.js`, the site runs on the sample data in `demo.
 - Edit names, colors, or the site title in `config.js`.
 
 ## Known issues
+- The `push` edge function needs a redeploy after the guests change (`guestView` in `golf.ts`) so alerts use guest names and handicaps. Until then alerts show a guest by their id.
 - The handicap and match math lives in two places (`app.js` and `supabase/functions/push/golf.ts`). A change to one needs the same change in the other, or alerts will disagree with the site.

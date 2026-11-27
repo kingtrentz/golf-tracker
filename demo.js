@@ -39,8 +39,10 @@ window.GOLF_DEMO = (function () {
     tee_name: "White", rating: 70.1, slope: 124, par: 72, players: ["trent", "logan"], status: "scheduled",
     scoring: "gross", title_match: false, notes: "" });
   const guests = [{ id: "demo-g1", first_name: "Sam", last_name: "Sample", handicap: 14.2 }];
-  const pars = [4, 5, 3, 4, 4, 3, 5, 4, 4, 4, 5, 3, 4, 4, 3, 5, 4, 4];
-  const cards = [{ id: "pv1", played_on: "2026-11-26", course_name: "Sample Links", tee_name: "White", rating: 70.1, slope: 124, par: 72,
-    pars, sis: [], players: ["trent", "dad", "logan"], scores: { __meta: { game: "match" } }, status: "live", scoring: "match" }];
+  const G = "g_demo-g1", pars = [4,5,3,4,3,4,4,5,4,4,5,4,3,4,4,5,3,4], N = Array(9).fill(null);
+  const cards = [{ id: "pv1", played_on: "2026-11-27", course_name: "Sample Links", tee_name: "White", rating: 68.4, slope: 121, par: 72,
+    pars, sis: [18,8,16,6,12,14,10,4,2,9,1,11,13,5,17,3,15,7], players: ["trent", "dad", "logan", G], status: "live", scoring: "match", bets: { pot: 20, type: "pot", scoring: "match" },
+    scores: { __meta: { game: "match", hcp: { trent: 30, dad: 14, logan: 12, [G]: 12 }, guests: { [G]: { hcp: 12, name: "Cesar Contreas", money: true } } },
+      trent: [6,8,5,5,4,6,6,8,5, ...N], dad: [5,6,5,6,4,4,7,7,6, ...N], logan: [5,5,4,6,3,5,6,6,4, ...N], [G]: [4,6,5,4,4,6,7,5,4, ...N] } }];
   return { courses, rounds, matches, guests, cards };
 })();

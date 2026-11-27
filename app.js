@@ -185,6 +185,16 @@ function evalMatch(m) {
       return matchPlay(a, b, A.holes, B.holes, roundCh(A.idx, A.r, n), roundCh(B.idx, B.r, n), pars, c.sis, gp[a], gp[b]);
     });
     const wins = Object.fromEntries(rows.map(x => [x.player, pairs.filter(p => p.winner === x.player).length]));
+    // Two players: whoever won the match. Three or more: most holes won (ties for the best net on a hole count
+    // for everyone tied, unless the whole group tied). Head to head still reads each pair's own match.
+    if (rows.length > 2) {
+      const P = rows.map(x => x.player), hw = holesWon(P, holeWinSets(P, Object.fromEntries(rows.map(x => [x.player, x.holes])), gp));
+      rows.forEach(x => x.holesWon = hw[x.player]);
+      const top = Math.max(...Object.values(hw));
+      const winners = rows.filter(x => hw[x.player] === top).map(x => x.player);
+      rows.sort((a, b) => hw[b.player] - hw[a.player] || (b.points ?? 0) - (a.points ?? 0));
+      return { rows, winners, outright: winners.length === 1 ? winners[0] : null, pairs, wins, hw };
+    }
     const top = Math.max(...Object.values(wins));
     const winners = top ? rows.filter(x => wins[x.player] === top).map(x => x.player) : rows.map(x => x.player);
     const outright = rows.find(x => wins[x.player] === rows.length - 1)?.player || null;
@@ -561,7 +571,7 @@ function viewH2H() {
     ${holder ? `<div class="cn">${dot(ch.holder)} ${esc(holder.name)}</div>
       <div class="cs">Holding since ${fmtDate(ch.since)} · ${daysBetween(ch.since, today())} days · ${ch.defenses} defense${ch.defenses === 1 ? "" : "s"}</div>`
       : `<div class="cn">Vacant</div><div class="cs">The first title match crowns the champ.</div>`}
-    <details><summary>How the belt works</summary><p>Every title match counts, but only when all three of you play it. Two of you, a solo round or guests never move the belt. The first outright winner takes the belt. After that, the champ keeps it unless someone finishes outright ahead of everyone (net, unless the match is set to gross) in a title match the champ plays. Ties go to the champ.</p></details>
+    <details><summary>How the belt works</summary><p>Every title match counts, but only when all three of you play it. Two of you, a solo round or guests never move the belt. The first outright winner takes the belt. After that, the champ keeps it unless someone finishes outright ahead of everyone (net, unless the match is set to gross) in a title match the champ plays. In match play that means most holes won. Ties go to the champ.</p></details>
     ${ch.reigns.length ? `<div class="reigns">${[...ch.reigns].reverse().map(r => `<div>${dot(r.player)}<b>${esc(pname(r.player))}</b> ${fmtShort(r.from)} – ${r.to ? fmtShort(r.to) : "now"} · ${r.defenses} def.</div>`).join("")}</div>` : ""}
   </section>`;
 
@@ -611,9 +621,9 @@ function viewH2H() {
     if (!ev) return "";
     return `<div class="match">
       <div class="mh"><b>${fmtDate(m.scheduled_for)}</b> · ${esc(m.course_name)}${isTitle(m) ? `<span class="tag gold">🏆</span>` : ""}<span class="tag">${SCORING_LABEL[m.scoring] || m.scoring}</span></div>
-      ${(() => { const showNet = m.scoring !== "gross" && !ev.pairs, showPts = ev.rows.some(r => r.points != null);
-        return `<table class="t res"><thead><tr><th></th><th class="n">Gross</th>${showNet ? `<th class="n">Hcp</th><th class="n">Net</th>` : ""}${showPts ? `<th class="n">Pts</th>` : ""}</tr></thead><tbody>
-      ${ev.rows.map(r => `<tr class="${ev.winners.includes(r.player) ? "win" : ""}"><td>${dot(r.player)}${esc(pname(r.player))}${ev.winners.includes(r.player) ? (ev.outright ? " 🏅" : " (tie)") : ""}</td><td class="n">${r.gross}</td>${showNet ? `<td class="n">${r.noHcp ? "–" : r.ch}</td><td class="n"><b>${r.net}</b></td>` : ""}${showPts ? `<td class="n">${r.points ?? "–"}</td>` : ""}</tr>`).join("")}
+      ${(() => { const showNet = m.scoring !== "gross" && !ev.pairs, showPts = ev.rows.some(r => r.points != null), showHw = !!ev.hw;
+        return `<table class="t res"><thead><tr><th></th><th class="n">Gross</th>${showNet ? `<th class="n">Hcp</th><th class="n">Net</th>` : ""}${showHw ? `<th class="n">Holes</th>` : ""}${showPts ? `<th class="n">Pts</th>` : ""}</tr></thead><tbody>
+      ${ev.rows.map(r => `<tr class="${ev.winners.includes(r.player) ? "win" : ""}"><td>${dot(r.player)}${esc(pname(r.player))}${ev.winners.includes(r.player) ? (ev.outright ? " 🏅" : " (tie)") : ""}</td><td class="n">${r.gross}</td>${showNet ? `<td class="n">${r.noHcp ? "–" : r.ch}</td><td class="n"><b>${r.net}</b></td>` : ""}${showHw ? `<td class="n"><b>${r.holesWon}</b></td>` : ""}${showPts ? `<td class="n">${r.points ?? "–"}</td>` : ""}</tr>`).join("")}
       </tbody></table>${ev.pairs ? `<div class="mpl">${ev.pairs.map(pr => `<div class="mpr"><span>${esc(pname(pr.a))} v ${esc(pname(pr.b))}</span><b>${esc(pr.text)}</b></div>`).join("")}</div>` : ""}`; })()}
       ${m.bets?.result ? `<div class="cbets"><span>Money</span><b>${m.bets.result.pays.length ? paysText(m.bets.result.pays, true) : "Nobody paid"}</b></div>${m.bets.note ? `<div class="note">${esc(m.bets.note)}</div>` : ""}` : ""}
       <div class="ed acts"><button class="link" data-act="edit-match" data-id="${m.id}">Edit</button><button class="link" data-act="results" data-id="${m.id}">Edit scores</button>${m.players.length > 1 ? `<button class="link" data-act="money" data-id="${m.id}">Money</button>` : ""}</div>
@@ -1390,6 +1400,20 @@ function holeWinners(card, pops) {
     return w.length === 1 ? w[0][0] : null;
   });
 }
+// Holes won with 3 or more players: everyone tied for the best net score on a hole wins it,
+// as long as they beat at least one other player. A hole is only halved when everyone ties.
+// Per hole: undefined until everyone has a score, [] when halved, else the winners.
+function holeWinSets(players, vals, pops) {
+  const n = vals[players[0]]?.length || 0;
+  return [...Array(n).keys()].map(i => {
+    if (players.length < 2 || players.some(p => vals[p][i] == null)) return undefined;
+    const nets = players.map(p => [p, vals[p][i] - (pops?.[p]?.[i] || 0)]);
+    const best = Math.min(...nets.map(x => x[1])), w = nets.filter(x => x[1] === best).map(x => x[0]);
+    return w.length === players.length ? [] : w;
+  });
+}
+const holesWon = (players, sets) => Object.fromEntries(players.map(p => [p, sets.filter(w => w && w.includes(p)).length]));
+const cardHoleWins = (card, pops, players = card.players) => holeWinSets(players, Object.fromEntries(players.map(s => [s, holeVals(card, s)])), pops);
 const cardPairs = card => { const pp = matchPops(card);
   return pairsOf(card.players).map(([a, b]) => matchPlay(a, b, holeVals(card, a), holeVals(card, b), cardCh(card, a), cardCh(card, b), card.pars, card.sis, pp[a], pp[b])); };
 // ---------- bets: front 9, back 9, game, presses ----------
@@ -1457,7 +1481,7 @@ function settleBets(card) {
 }
 // ---------- pot: everyone in the money buys in once; the best result in the round's game takes it ----------
 // Scored by the money's own scoring (moneyGame). Stroke play: lowest gross. Net: lowest net. Stableford: most points. Skins: most skins.
-// Match play: most matches won across the pairings, then most holes up overall.
+// Match play: most holes won (tied for the best net on a hole and beating at least one other player counts).
 // Ties split the pot. It only pays once everyone in it has finished every hole.
 const POT_DEFAULT = (CFG.bets && CFG.bets.pot) || 10;
 function potRows(card) {
@@ -1465,10 +1489,8 @@ function potRows(card) {
   if (gm === "stableford") return P.map(s => { const v = stableford(holeVals(card, s), card.pars, card.sis, null, pops[s]).pts; return { s, k: [v], show: `${v} pt${v === 1 ? "" : "s"}` }; });
   if (gm === "skins") { const sk = cardSkins(card, pops); return P.map(s => { const v = sk.skins[s] || 0; return { s, k: [v], show: `${v} skin${v === 1 ? "" : "s"}` }; }); }
   if (gm === "match") {
-    const w = Object.fromEntries(P.map(s => [s, 0])), up = { ...w };
-    pairsOf(P).forEach(([a, b]) => { const pr = matchPlay(a, b, holeVals(card, a), holeVals(card, b), cardCh(card, a), cardCh(card, b), card.pars, card.sis, pops[a], pops[b]);
-      up[a] += pr.up; up[b] -= pr.up; if (pr.up > 0) w[a]++; else if (pr.up < 0) w[b]++; });
-    return P.map(s => ({ s, k: [w[s], up[s]], show: `${w[s]} won · ${up[s] > 0 ? "+" : ""}${up[s]}` }));
+    const hw = holesWon(P, cardHoleWins(card, pops, P));
+    return P.map(s => ({ s, k: [hw[s]], show: `${hw[s]} hole${hw[s] === 1 ? "" : "s"} won` }));
   }
   // Stroke (gross) has no strokes in matchPops; net takes the group strokes off.
   return P.map(s => { let t = 0; holeVals(card, s).forEach((v, i) => { if (v != null) t += v - pops[s][i] - card.pars[i]; });
@@ -1911,6 +1933,8 @@ function cardStory(card) {
 
   // Headline
   const gm = cardGame(card), pops = matchPops(card);
+  // Match play with 3 or more: holes won is the score (see holeWinSets).
+  const hw = gm === "match" && P.length > 2 ? holesWon(P, cardHoleWins(card, pops)) : null;
   let head;
   const ptsLead = [...P].sort((a, b) => pts[b].pts - pts[a].pts);
   if (!thruAll) {
@@ -1956,9 +1980,12 @@ function cardStory(card) {
       return lead ? `${pname(lead)} ${Math.abs(pr.up)} up on ${pname(other)}` : `${pname(pr.a)} and ${pname(pr.b)} all square`;
     };
     const going = live.filter(pr => !pr.done).map(one).join(" · "), over = live.filter(pr => pr.done).map(one).join(" · ");
-    head = [going && `${going} thru ${thruAll}`, over].filter(Boolean).join(" · ") + ".";
+    let most = "";
+    if (hw) { const top = Math.max(...P.map(s => hw[s])), lead = P.filter(s => hw[s] === top), h = `${top} hole${top === 1 ? "" : "s"}`;
+      if (top) most = lead.length === 1 ? `${pname(lead[0])} has won the most holes (${h}). ` : `${lead.map(pname).join(" and ")} have won the most holes (${h} each). `; }
+    head = most + [going && `${going} thru ${thruAll}`, over].filter(Boolean).join(" · ") + ".";
   } else head = `${pts[P[0]].pts} points thru ${thruAll}.`;
-  return { head, moments, pairs, pts, thruAll };
+  return { head, moments, pairs, pts, thruAll, hw };
 }
 
 function viewCard(id) {
@@ -1972,11 +1999,15 @@ function viewCard(id) {
   const pops = matchPops(card);
   const wins = holeWinners(card, pops);
   const gm = cardGame(card), sk = gm === "skins" ? cardSkins(card, pops) : null;
+  // Who won each hole for the popline and the scorecard: skins needs it outright; every other game
+  // gives the hole to everyone tied for the best who beat at least one other player.
+  const wset = sk ? wins.map(w => w === undefined ? undefined : w ? [w] : []) : cardHoleWins(card, pops);
+  const hw = st.hw;
   const two = gm === "match" && st.pairs.length === 1 ? st.pairs[0] : null;
   const chip = s => { if (!two || !two.thru) return ""; const me = (s === two.a ? 1 : -1) * two.up;
     return me > 0 ? `<span class="mchip up">${me} UP</span>` : me === 0 ? `<span class="mchip as">AS</span>` : ""; };
-  const board = card.players.map(s => ({ s, t: cardTotals(card, s), p: st.pts[s], ch: cardCh(card, s), sk: sk ? sk.skins[s] ?? 0 : 0 }))
-    .sort((a, b) => (b.t.thru ? 1 : 0) - (a.t.thru ? 1 : 0) || (sk ? b.sk - a.sk : b.p.pts - a.p.pts) || a.t.toPar - b.t.toPar);
+  const board = card.players.map(s => ({ s, t: cardTotals(card, s), p: st.pts[s], ch: cardCh(card, s), sk: sk ? sk.skins[s] ?? 0 : 0, hw: hw ? hw[s] : 0 }))
+    .sort((a, b) => (b.t.thru ? 1 : 0) - (a.t.thru ? 1 : 0) || (hw ? b.hw - a.hw : 0) || (sk ? b.sk - a.sk : b.p.pts - a.p.pts) || a.t.toPar - b.t.toPar);
   const others = state.cards.filter(c => c.id !== id);
 
   // Pieces of the top box, shared by the follow-along layout and the scoring layout.
@@ -1987,7 +2018,7 @@ function viewCard(id) {
   const lboard = `<div class="lboard">${board.map(x => `<div class="lrow">
       <span class="lname">${dot(x.s)}${esc(pname(x.s))}${chip(x.s)}</span>
       <span class="lscore">${x.t.thru ? `<b>${fmtToPar(x.t.toPar)}</b><small>${x.t.gross}</small>` : `<span class="muted">–</span>`}</span>
-      <span class="lpts">${x.t.thru ? (sk ? `<b>${x.sk}</b><small>skin${x.sk === 1 ? "" : "s"}</small>` : `<b>${x.p.pts}</b><small>pts</small>`) : ""}</span></div>`).join("")}</div>`;
+      <span class="lpts">${x.t.thru ? (sk ? `<b>${x.sk}</b><small>skin${x.sk === 1 ? "" : "s"}</small>` : hw ? `<b>${x.hw}</b><small>won</small>` : `<b>${x.p.pts}</b><small>pts</small>`) : ""}</span></div>`).join("")}</div>`;
   // One short row per pairing: names left, standing right ("–" until the pair has played a hole).
   const mlines = st.pairs.length > 1 ? `<div class="mlines">${st.pairs.map(pr => `<div class="mp"><span class="mpn">${esc(pname(pr.a))} v ${esc(pname(pr.b))}</span>${pr.thru ? `<b>${esc(pr.text.replace(/ thru \d+$/, ""))}</b>` : `<span class="muted">–</span>`}</div>`).join("")}</div>` : "";
   const hcpline = `<div class="hcpline">${card.players.filter(p => pops[p].some(x => x > 0)).map(p => `${esc(pname(p))} strokes on ${pops[p].map((x, i) => x > 0 ? i + 1 + (x > 1 ? "×" + x : "") : null).filter(Boolean).join(", ")}`).join(" · ") || (card.players.length > 1 ? "Playing level, no strokes" : "")}${board.some(x => x.ch != null) ? ` · course hcp ${board.map(x => `${esc(pname(x.s))} ${x.ch ?? "–"}`).join(", ")}` : ""}</div>`;
@@ -2008,10 +2039,10 @@ function viewCard(id) {
     const me = (s === pr.a ? 1 : -1) * pr.up;
     return me > 0 ? `<td class="mx-up"${tip}>${me} up</td>` : me < 0 ? `<td class="mx-dn"${tip}>${-me} dn</td>` : `<td${tip}>AS</td>`;
   };
-  const stable = `<table class="stbl"><thead><tr><th></th><th>Score</th><th>${sk ? "Skins" : "Pts"}</th>${multi ? card.players.map(o => `<th>${dot(o)}${short(o)}</th>`).join("") : ""}</tr></thead>
+  const stable = `<table class="stbl"><thead><tr><th></th><th>Score</th><th>${sk ? "Skins" : hw ? "Won" : "Pts"}</th>${multi ? card.players.map(o => `<th>${dot(o)}${short(o)}</th>`).join("") : ""}</tr></thead>
     <tbody>${board.map(x => `<tr><td class="stn">${dot(x.s)}<span>${esc(pname(x.s))}</span>${chip(x.s)}</td>
       <td class="sts">${x.t.thru ? `<b>${fmtToPar(x.t.toPar)}</b><small>${x.t.gross}</small>` : `<span class="muted">–</span>`}</td>
-      <td class="stp">${x.t.thru ? `<b>${sk ? x.sk : x.p.pts}</b>` : `<span class="muted">–</span>`}</td>
+      <td class="stp">${x.t.thru ? `<b>${sk ? x.sk : hw ? x.hw : x.p.pts}</b>` : `<span class="muted">–</span>`}</td>
       ${multi ? card.players.map(o => vs(x.s, o)).join("") : ""}</tr>`).join("")}</tbody></table>`;
   const ld = longestDrive(card);
   const ldLine = ld ? `<div class="ldrive">Longest drive: ${esc(pname(ld.s))} ${ld.yds} yds (hole ${ld.hole})</div>` : "";
@@ -2034,7 +2065,7 @@ function viewCard(id) {
         <button class="nav" data-act="hole" data-v="${hole - 1}" ${hole === 0 ? "disabled" : ""} aria-label="Previous hole">‹</button>
         <div class="hnum"><div class="hn">Hole ${hole + 1}</div><button class="parbtn" data-act="cardsc" data-id="${id}">Par ${card.pars[hole]} · Hcp ${si[hole]}<span data-ryds="${id}:${hole}">${ydRoughText(card, hole)}</span></button>
           <button class="yds" data-act="yds" data-yds="${id}:${hole}">${ydText(card, hole)}</button>
-          <div class="popline">${wins[hole] !== undefined ? (wins[hole] ? `<span class="hwin">${esc(pname(wins[hole]))} wins the hole</span>` : `<span class="hhalf">Hole halved</span>`) : ""}${(() => { if (wins[hole] !== undefined) return ""; const g = card.players.filter(p => pops[p][hole] > 0); return card.players.length < 2 ? "" : g.length ? `${g.map(p => esc(pname(p))).join(" & ")} ${g.length > 1 ? "stroke" : "strokes"} here` : "No strokes here"; })()}</div></div>
+          <div class="popline">${wset[hole] !== undefined ? (wset[hole].length ? `<span class="hwin">${wset[hole].map(p => esc(pname(p))).join(", ").replace(/, ([^,]*)$/, " & $1")} ${wset[hole].length > 1 ? "win" : "wins"} the hole</span>` : `<span class="hhalf">Hole halved</span>`) : ""}${(() => { if (wset[hole] !== undefined) return ""; const g = card.players.filter(p => pops[p][hole] > 0); return card.players.length < 2 ? "" : g.length ? `${g.map(p => esc(pname(p))).join(" & ")} ${g.length > 1 ? "stroke" : "strokes"} here` : "No strokes here"; })()}</div></div>
         <button class="nav" data-act="hole" data-v="${hole + 1}" ${hole === n - 1 ? "disabled" : ""} aria-label="Next hole">›</button>
       </div>
       <div class="satwrap" data-sat="${id}:${hole}" hidden>
@@ -2071,7 +2102,7 @@ function viewCard(id) {
       <tr class="hcp"><td>Hcp</td>${idx.map(i => `<td>${si[i]}</td>`).join("")}<td></td></tr></thead>
       <tbody>${card.players.map(s => { const v = holeVals(card, s); const got = idx.filter(i => v[i] != null);
         const ch = cardCh(card, s), net = ch == null ? null : sum(got.map(i => v[i] - strokesOn(ch, si[i], n)));
-        return `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}${ch != null ? `<small class="sch">${ch}</small>` : ""}</td>${idx.map(i => `<td class="${pops[s][i] > 0 ? "pop" : ""} ${wins[i] === s ? "won" : ""}"><span class="${v[i] == null ? "" : scoreCls(v[i], card.pars[i])}">${v[i] ?? ""}</span></td>`).join("")}<td><b>${got.length ? sum(got.map(i => v[i])) : ""}</b>${got.length && net != null ? `<small class="snet">net ${net}</small>` : ""}</td></tr>`; }).join("")}${two ? (() => { let up = 0; const run = card.pars.map((_, i) => { if (wins[i] === undefined) return null; up += wins[i] === two.a ? 1 : wins[i] === two.b ? -1 : 0; return up; });
+        return `<tr><td>${dot(s)}${esc(pname(s).slice(0, 5))}${ch != null ? `<small class="sch">${ch}</small>` : ""}</td>${idx.map(i => `<td class="${pops[s][i] > 0 ? "pop" : ""} ${wset[i]?.includes(s) ? "won" : ""}"><span class="${v[i] == null ? "" : scoreCls(v[i], card.pars[i])}">${v[i] ?? ""}</span></td>`).join("")}<td><b>${got.length ? sum(got.map(i => v[i])) : ""}</b>${got.length && net != null ? `<small class="snet">net ${net}</small>` : ""}</td></tr>`; }).join("")}${two ? (() => { let up = 0; const run = card.pars.map((_, i) => { if (wins[i] === undefined) return null; up += wins[i] === two.a ? 1 : wins[i] === two.b ? -1 : 0; return up; });
         return `<tr class="mrow"><td>Match</td>${idx.map(i => run[i] == null ? "<td></td>" : `<td><span class="ms" style="color:${run[i] ? pcolor(run[i] > 0 ? two.a : two.b) : "var(--muted)"}">${run[i] ? Math.abs(run[i]) : "AS"}</span></td>`).join("")}<td></td></tr>`; })() : ""}</tbody></table>`;
   };
   const hl = st.moments.filter(m => m.i < n || m.kind === "great");
